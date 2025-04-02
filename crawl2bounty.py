@@ -193,7 +193,11 @@ def main():
     try:
         # Inicializar componentes
         console = ConsoleManager(verbose=args.verbose)
-        report_generator = ReportGenerator(console_manager=console, output_file=args.output, domain_dir=domain_dir)
+        report_generator = ReportGenerator(
+            console_manager=console, 
+            output_file=args.output,
+            domain_dir=domain_dir
+        )
         crawler = SmartCrawler(
             base_url=args.url,
             max_depth=args.depth,

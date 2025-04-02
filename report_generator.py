@@ -13,7 +13,7 @@ class ReportGenerator:
     def __init__(self, console_manager: ConsoleManager, output_file: str = None, domain_dir: str = None):
         """Initialize the ReportGenerator with console manager."""
         self.console = console_manager
-        self.findings = []
+        self.findings = defaultdict(list)  # Inicializar como defaultdict para evitar KeyError
         self.metadata = {
             "scan_start": datetime.now().isoformat(),
             "scan_end": None,
@@ -32,6 +32,12 @@ class ReportGenerator:
         # Usar el directorio del dominio si está disponible
         self.domain_dir = domain_dir or 'reports'
         
+        # Asegurar que existan los directorios necesarios
+        os.makedirs(self.domain_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.domain_dir, 'logs'), exist_ok=True)
+        os.makedirs(os.path.join(self.domain_dir, 'screenshots'), exist_ok=True)
+        os.makedirs(os.path.join(self.domain_dir, 'responses'), exist_ok=True)
+        
         # Configurar nombres de archivos
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.report_file = os.path.join(self.domain_dir, f"report_{timestamp}.json")
@@ -43,6 +49,13 @@ class ReportGenerator:
             self.report_file = os.path.join(self.domain_dir, f"{output_file}.json")
             self.findings_log_file = os.path.join(self.domain_dir, 'logs', f"{output_file}_findings.log")
             self.events_log_file = os.path.join(self.domain_dir, 'logs', f"{output_file}_events.log")
+            
+        # Crear archivos de log vacíos
+        for log_file in [self.findings_log_file, self.events_log_file]:
+            with open(log_file, 'w', encoding='utf-8') as f:
+                f.write(f"=== Log iniciado el {datetime.now().isoformat()} ===\n")
+                f.flush()
+                os.fsync(f.fileno())
 
     def add_findings(self, section: str, findings: List[Dict[str, Any]]):
         """Adds a list of findings under a specific section, ensuring severity."""
@@ -81,15 +94,17 @@ class ReportGenerator:
             else:
                 details_str = str(details)
             
+            # Crear entrada de log
             log_entry = f"[{timestamp}] [{severity}] {finding_type}\nURL: {url}{details_str}\n{'='*80}\n"
             
-            # Usar with para asegurar que el archivo se cierre correctamente
+            # Escribir en el archivo de log
             with open(self.findings_log_file, 'a', encoding='utf-8') as f:
                 f.write(log_entry)
                 f.flush()  # Forzar la escritura inmediata
                 os.fsync(f.fileno())  # Asegurar que se escriba en el disco
                 
-            self.console.print_debug(f"Hallazgo registrado en tiempo real: {finding_type} en {url}")
+            # Mostrar en la consola
+            self.console.print_finding(finding_type, severity, details, url)
                 
         except Exception as e:
             self.console.print_error(f"Error registrando hallazgo en log: {e}")
@@ -106,8 +121,23 @@ class ReportGenerator:
             
             log_entry += "\n" + "-"*80 + "\n"
             
+            # Escribir en el archivo de log
             with open(self.events_log_file, 'a', encoding='utf-8') as f:
                 f.write(log_entry)
+                f.flush()  # Forzar la escritura inmediata
+                os.fsync(f.fileno())  # Asegurar que se escriba en el disco
+                
+            # Mostrar en la consola según el tipo de evento
+            if event_type == "ERROR":
+                self.console.print_error(message)
+            elif event_type == "WARNING":
+                self.console.print_warning(message)
+            elif event_type == "INFO":
+                self.console.print_info(message)
+            elif event_type == "SUCCESS":
+                self.console.print_success(message)
+            else:
+                self.console.print_debug(message)
                 
         except Exception as e:
             self.console.print_error(f"Error registrando evento en log: {e}")
