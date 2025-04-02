@@ -76,56 +76,64 @@ class SmartCrawler:
         
         self.console.print_info("SmartCrawler initialized.")
 
-    async def start_crawl(self, start_url: str, max_depth: int = 3):
-        """Start the crawling process with the given URL and max depth."""
-        self.console.print_info(f"Starting crawl from {start_url} with max depth {max_depth}")
-        
+    async def start_crawl(self, start_url: str):
+        """Start the crawling process."""
         try:
-            # Initialize browser and page
+            # Inicializar Playwright con opciones anti-detección
             playwright = await async_playwright().start()
-            self.browser = await playwright.chromium.launch(headless=True)
-            self.context = await self.browser.new_context()
-            self.page = await self.context.new_page()
+            self.browser = await playwright.chromium.launch(
+                headless=True,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-site-isolation-trials',
+                    '--disable-web-security',
+                    '--disable-features=BlockInsecurePrivateNetworkRequests'
+                ]
+            )
             
-            # Add initial URL to crawl queue
+            # Configurar contexto con opciones anti-detección
+            self.context = await self.browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                locale='es-ES',
+                timezone_id='America/Argentina/Buenos_Aires',
+                geolocation={'latitude': -34.6037, 'longitude': -58.3816},
+                permissions=['geolocation']
+            )
+            
+            # Configurar página con scripts anti-detección
+            self.page = await self.context.new_page()
+            await self.page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['es-ES', 'es', 'en-US', 'en']
+                });
+            """)
+            
+            # Iniciar el crawling
             await self.add_to_crawl_queue(start_url, 0)
             
-            # Main crawl loop
-            while self.crawl_queue:
+            while not self.crawl_queue.empty():
                 url, depth = await self.crawl_queue.get()
-                
-                # Skip if URL already visited or depth exceeded
-                if url in self.visited_urls or depth > max_depth:
-                    continue
-                
-                # Mark URL as visited
-                self.visited_urls.add(url)
-                
-                # Process URL
-                await self._process_single_url(url, depth)
-                
-                # Wait for rate limiting
-                await asyncio.sleep(self.rate_limit_delay)
-            
-            # Cleanup
-            await self.page.close()
-            await self.context.close()
-            await self.browser.close()
-            await playwright.stop()
-            
-            self.console.print_info("Crawl completed successfully")
+                if url not in self.visited_urls and depth <= self.max_depth:
+                    self.visited_urls.add(url)
+                    await self._process_single_url(url, depth)
             
         except Exception as e:
             self.console.print_error(f"Error during crawl: {e}")
-            # Cleanup on error
-            if hasattr(self, 'page') and not self.page.is_closed():
+        finally:
+            if self.page:
                 await self.page.close()
-            if hasattr(self, 'context') and not self.context.is_closed():
+            if self.context:
                 await self.context.close()
-            if hasattr(self, 'browser') and not self.browser.is_closed():
+            if self.browser:
                 await self.browser.close()
-            if 'playwright' in locals():
-                await playwright.stop()
 
     async def _crawl(self, page: Page, url: str, depth: int):
         """Recursive function to crawl the website."""
@@ -167,20 +175,61 @@ class SmartCrawler:
         self.console.print_info(f"Processing URL: {url} (depth: {depth})")
         
         try:
-            # Navigate to URL
-            await self.page.goto(url, wait_until="networkidle", timeout=self.timeout)
-            await self.page.wait_for_load_state("load", timeout=self.timeout)
+            # Configurar opciones de navegación más robustas
+            navigation_options = {
+                "wait_until": "domcontentloaded",
+                "timeout": self.timeout,
+                "referer": self.base_url
+            }
             
-            if self.report_generator:
-                self.report_generator.log_realtime_event("PAGE_LOADED", f"Página cargada: {url}", {
-                    "title": await self.page.title(),
-                    "status": "success"
-                })
+            # Intentar navegar a la URL
+            try:
+                await self.page.goto(url, **navigation_options)
+            except Exception as e:
+                self.console.print_warning(f"Error en primera navegación a {url}: {e}")
+                navigation_options["wait_until"] = "load"
+                await self.page.goto(url, **navigation_options)
+            
+            # Esperar a que la página se cargue completamente
+            try:
+                await self.page.wait_for_load_state("load", timeout=self.timeout)
+            except Exception as e:
+                self.console.print_warning(f"Error esperando carga completa de {url}: {e}")
+            
+            # Verificar si hay CAPTCHA
+            page_content = await self.page.content()
+            if await self._detect_captcha(page_content):
+                self.console.print_warning(f"CAPTCHA detectado en {url}")
+                if self.report_generator:
+                    self.report_generator.add_findings("access_control", [{
+                        "type": "captcha_detected",
+                        "severity": "INFO",
+                        "url": url,
+                        "details": "Se detectó un CAPTCHA en la página"
+                    }])
+                
+                # Intentar manejar el CAPTCHA
+                if await self._handle_captcha(url):
+                    self.console.print_success(f"CAPTCHA superado en {url}")
+                else:
+                    self.console.print_error(f"No se pudo superar el CAPTCHA en {url}")
+                    return
+            
+            # Verificar si la página está bloqueada
+            if any(blocked_text in page_content.lower() for blocked_text in ["access denied", "bot detected", "security check"]):
+                self.console.print_warning(f"Página {url} parece estar bloqueada")
+                if self.report_generator:
+                    self.report_generator.add_findings("access_control", [{
+                        "type": "page_blocked",
+                        "severity": "INFO",
+                        "url": url,
+                        "details": "La página parece estar bloqueada"
+                    }])
+                return
             
             # Static JS analysis
             self.console.print_debug("Performing static JS analysis...")
-            js_content = await self.page.content()
-            js_findings = await self.detector.analyze_js(js_content)
+            js_findings = await self.detector.analyze_js(page_content)
             
             if self.report_generator and js_findings:
                 self.report_generator.add_findings("javascript_analysis", js_findings)
@@ -643,3 +692,65 @@ class SmartCrawler:
             
         except Exception as e:
             self.console.print_error(f"Error guardando respuesta: {e}")
+
+    async def _detect_captcha(self, page_content: str) -> bool:
+        """Detecta si hay un CAPTCHA en la página."""
+        captcha_indicators = [
+            "captcha", "recaptcha", "hcaptcha", "cloudflare", "security check",
+            "verification", "robot check", "human verification",
+            "g-recaptcha", "data-sitekey", "cf-turnstile"
+        ]
+        
+        return any(indicator in page_content.lower() for indicator in captcha_indicators)
+
+    async def _handle_captcha(self, url: str) -> bool:
+        """Intenta manejar el CAPTCHA de diferentes maneras."""
+        try:
+            # 1. Intentar con diferentes User-Agents
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15'
+            ]
+            
+            for user_agent in user_agents:
+                await self.context.set_extra_http_headers({
+                    'User-Agent': user_agent
+                })
+                await self.page.goto(url, wait_until="domcontentloaded")
+                page_content = await self.page.content()
+                if not await self._detect_captcha(page_content):
+                    return True
+                await asyncio.sleep(2)
+            
+            # 2. Intentar con diferentes IPs (usando proxy)
+            proxies = [
+                None,  # Sin proxy primero
+                'http://proxy1.example.com:8080',
+                'http://proxy2.example.com:8080'
+            ]
+            
+            for proxy in proxies:
+                if proxy:
+                    await self.context.set_extra_http_headers({
+                        'X-Forwarded-For': f'192.168.{random.randint(1,255)}.{random.randint(1,255)}'
+                    })
+                await self.page.goto(url, wait_until="domcontentloaded")
+                page_content = await self.page.content()
+                if not await self._detect_captcha(page_content):
+                    return True
+                await asyncio.sleep(2)
+            
+            # 3. Intentar con diferentes configuraciones de navegador
+            await self.context.clear_cookies()
+            await self.page.goto(url, wait_until="domcontentloaded")
+            page_content = await self.page.content()
+            if not await self._detect_captcha(page_content):
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.console.print_error(f"Error manejando CAPTCHA: {e}")
+            return False
