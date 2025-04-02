@@ -13,6 +13,8 @@ import httpx
 import signal
 from typing import Optional
 from urllib.parse import urlparse
+from smart_detector import SmartDetector
+from attack_engine import AttackEngine
 
 # Constantes de configuración
 MAX_DEPTH = 10  # Profundidad máxima recomendada

