@@ -1,9 +1,0 @@
-[2025-04-02T15:19:46.259822] Iniciando escaneo
-[2025-04-02T15:19:47.756209] [URL_PROCESSING] Procesando URL: https://mercadolibre.com.ar
-  depth: 0
-  timestamp: 2025-04-02T15:19:47.756190
---------------------------------------------------------------------------------
-[2025-04-02T15:20:01.340688] [PAGE_LOADED] Página cargada: https://mercadolibre.com.ar
-  title: Mercado Libre Argentina - Envíos Gratis en el día
-  status: success
---------------------------------------------------------------------------------
