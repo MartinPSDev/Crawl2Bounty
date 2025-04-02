@@ -38,3 +38,13 @@ Findings
 Results are classified by type (e.g., sql_injection, xss_reflected) and severity (CRITICAL, HIGH, MEDIUM, LOW, INFO), including details such as affected URLs, payloads used, and steps to reproduce.
 
 In summary, CRAWL2BOUNTY is a comprehensive tool that combines static and dynamic analysis to evaluate web application security, ideal for bug bounty environments or security audits.
+
+## Usage
+
+`pip intall -r requirements.txt`
+
+`python3 crawl2bounty.py Https://target.com`
+
+## Example 
+
+`python3 crawl2bounty.py https://target.com  -v --depth 4  --rate-limit 5 -o results`
