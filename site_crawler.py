@@ -34,7 +34,8 @@ class SmartCrawler:
                  included_patterns: List[str] = None,
                  interactsh_url: Optional[str] = None,
                  report_generator: Optional[ReportGenerator] = None,
-                 force: bool = False):
+                 force: bool = False,
+                 domain_dir: str = None):
         """Initialize the SmartCrawler with configuration parameters."""
         # Initialize console manager with verbose enabled
         self.console = ConsoleManager(verbose=True)
@@ -55,7 +56,8 @@ class SmartCrawler:
         self.rate_limit_delay = rate_limit
         self.excluded_patterns = excluded_patterns or []
         self.included_patterns = included_patterns or []
-        self.force = force  # Nuevo parámetro para forzar el análisis de dominios excluidos
+        self.force = force
+        self.domain_dir = domain_dir or 'reports'
         
         # Initialize crawl state
         self.crawl_queue = asyncio.Queue()
@@ -595,3 +597,45 @@ class SmartCrawler:
         except Exception as e:
             self.console.print_warning(f"Error getting next search term: {e}")
             return None
+
+    async def save_screenshot(self, url: str):
+        """Guarda una captura de pantalla de la página."""
+        try:
+            if not self.page:
+                return
+                
+            # Crear nombre de archivo seguro
+            safe_filename = re.sub(r'[^a-zA-Z0-9]', '_', urlparse(url).path)
+            if not safe_filename:
+                safe_filename = 'index'
+            safe_filename = f"{safe_filename}.png"
+            
+            # Guardar en el directorio del dominio
+            screenshot_path = os.path.join(self.domain_dir, 'screenshots', safe_filename)
+            await self.page.screenshot(path=screenshot_path, full_page=True)
+            self.console.print_debug(f"Captura de pantalla guardada: {screenshot_path}")
+            
+        except Exception as e:
+            self.console.print_error(f"Error guardando captura de pantalla: {e}")
+
+    async def save_response(self, url: str):
+        """Guarda la respuesta HTTP de la página."""
+        try:
+            if not self.page:
+                return
+                
+            # Crear nombre de archivo seguro
+            safe_filename = re.sub(r'[^a-zA-Z0-9]', '_', urlparse(url).path)
+            if not safe_filename:
+                safe_filename = 'index'
+            safe_filename = f"{safe_filename}.html"
+            
+            # Guardar en el directorio del dominio
+            response_path = os.path.join(self.domain_dir, 'responses', safe_filename)
+            content = await self.page.content()
+            with open(response_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.console.print_debug(f"Respuesta guardada: {response_path}")
+            
+        except Exception as e:
+            self.console.print_error(f"Error guardando respuesta: {e}")
