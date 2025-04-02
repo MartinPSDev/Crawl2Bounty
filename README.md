@@ -48,3 +48,10 @@ In summary, CRAWL2BOUNTY is a comprehensive tool that combines static and dynami
 ## Example 
 
 `python3 crawl2bounty.py https://target.com  -v --depth 4  --rate-limit 5 -o results`
+
+## IMPORTANT
+
+**Social media URLs or bots from Google, Bing, etc. are excluded so as not to go out of scope and start crawling through sites that aren't our target. If we want to analyze a social media ( Facebook, Instagram ,Tik Tok, X ) , Google, Yahoo, etc., we must include the -f or --force flag to remove URL restrictions.**
+
+Example:
+`python3 crawl2bounty.py https://instagram.com --force`
