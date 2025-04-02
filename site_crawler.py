@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class SmartCrawler:
     def __init__(self, 
                  base_url: str,
-                 max_depth: int = 3,
+                 max_depth: int = 2,
                  timeout: int = 30,
                  rate_limit: float = 1.0,
                  excluded_patterns: List[str] = None,

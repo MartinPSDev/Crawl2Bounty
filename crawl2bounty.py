@@ -144,7 +144,7 @@ def main():
     """Main function to run the web vulnerability scanner."""
     parser = argparse.ArgumentParser(description='Web Vulnerability Scanner with Advanced Features')
     parser.add_argument('url', help='Target URL to scan')
-    parser.add_argument('--depth', type=int, default=3, help='Maximum crawl depth (default: 3)')
+    parser.add_argument('--depth', type=int, default=2, help='Maximum crawl depth (default: 2)')
     parser.add_argument('--timeout', type=int, default=30, help='Request timeout in seconds (default: 30)')
     parser.add_argument('--rate-limit', type=float, default=1.0, help='Delay between requests in seconds (default: 1.0)')
     parser.add_argument('--exclude', nargs='+', help='Patterns to exclude from crawling')
