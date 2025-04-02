@@ -59,6 +59,10 @@ class SmartCrawler:
         self.force = force
         self.domain_dir = domain_dir or 'reports'
         
+        # Configuración de búsqueda
+        self.searches_per_page = 3  # Número máximo de búsquedas por página
+        self.max_search_depth = 2  # Profundidad máxima para búsquedas
+        
         # Initialize crawl state
         self.crawl_queue = asyncio.Queue()
         self.visited_urls = set()
