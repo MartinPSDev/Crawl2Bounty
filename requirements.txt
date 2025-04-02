@@ -1,0 +1,6 @@
+playwright>=1.40.0
+jsbeautifier>=1.14.9
+aiohttp>=3.9.1
+typing-extensions>=4.8.0
+rich>=13.0.0 
+httpx[http2]>=0.25.0 
