@@ -10,38 +10,40 @@ from console_manager import ConsoleManager
 from urllib.parse import urlparse
 
 class ReportGenerator:
-    def __init__(self, console_manager: ConsoleManager, output_prefix: str = "crawl2bounty", save_screenshots: bool = False, save_responses: bool = False):
+    def __init__(self, console_manager: ConsoleManager, output_file: str = None):
+        """Initialize the ReportGenerator with console manager."""
         self.console = console_manager
-        self.output_prefix = output_prefix
-        self.save_screenshots = save_screenshots
-        self.save_responses = save_responses
-        self.findings: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self.findings = []
         self.metadata = {
-            "scan_start_time": time.time(),
-            "scan_start_iso": datetime.now().isoformat(),
-            "scan_end_time": None,
-            "scan_end_iso": None,
-            "version": "1.1.0",
-            "scan_target": None,
-            "scan_duration_seconds": None,
-            "scan_status": "initiated"
+            "scan_start": datetime.now().isoformat(),
+            "scan_end": None,
+            "total_urls": 0,
+            "total_findings": 0,
+            "vulnerability_types": set(),
+            "severity_counts": {
+                "critical": 0,
+                "high": 0,
+                "medium": 0,
+                "low": 0,
+                "info": 0
+            }
         }
         
-        # Crear directorio de logs si no existe
-        self.logs_dir = "logs"
-        os.makedirs(self.logs_dir, exist_ok=True)
+        # Crear directorios si no existen
+        os.makedirs('reports', exist_ok=True)
+        os.makedirs('logs', exist_ok=True)
         
-        # Inicializar archivos de log
-        self.realtime_log_file = os.path.join(self.logs_dir, f"{output_prefix}_realtime.log")
-        self.findings_log_file = os.path.join(self.logs_dir, f"{output_prefix}_findings.log")
+        # Configurar nombres de archivos
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.report_file = f"reports/report_{timestamp}.json"
+        self.findings_log_file = f"logs/findings_{timestamp}.log"
+        self.events_log_file = f"logs/events_{timestamp}.log"
         
-        # Crear/limpiar archivos de log
-        with open(self.realtime_log_file, 'w', encoding='utf-8') as f:
-            f.write(f"[{datetime.now().isoformat()}] Iniciando escaneo\n")
-        with open(self.findings_log_file, 'w', encoding='utf-8') as f:
-            f.write(f"[{datetime.now().isoformat()}] Iniciando registro de hallazgos\n")
-            
-        self.console.print_debug("ReportGenerator inicializado con logging en tiempo real.")
+        # Si se especifica un archivo de salida, usarlo
+        if output_file:
+            self.report_file = f"reports/{output_file}.json"
+            self.findings_log_file = f"logs/{output_file}_findings.log"
+            self.events_log_file = f"logs/{output_file}_events.log"
 
     def add_findings(self, section: str, findings: List[Dict[str, Any]]):
         """Adds a list of findings under a specific section, ensuring severity."""
@@ -105,7 +107,7 @@ class ReportGenerator:
             
             log_entry += "\n" + "-"*80 + "\n"
             
-            with open(self.realtime_log_file, 'a', encoding='utf-8') as f:
+            with open(self.events_log_file, 'a', encoding='utf-8') as f:
                 f.write(log_entry)
                 
         except Exception as e:
