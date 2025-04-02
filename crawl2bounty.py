@@ -96,36 +96,29 @@ def validate_depth(depth: int) -> bool:
     """Valida que la profundidad de rastreo esté dentro de los límites permitidos."""
     return MIN_DEPTH <= depth <= MAX_DEPTH
 
-async def run_scan(
-    crawler: SmartCrawler,
-    detector: SmartDetector,
-    attack_engine: AttackEngine,
-    report_generator: ReportGenerator,
-    save_screenshots: bool,
-    save_responses: bool
-) -> None:
+async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine: AttackEngine, report_generator: ReportGenerator, save_screenshots: bool = False, save_responses: bool = False):
     """Ejecuta el escaneo completo."""
     try:
-        # Iniciar el crawler
-        await crawler.start_crawl()
+        # Iniciar el crawling
+        await crawler.start_crawl(crawler.base_url)
         
-        # Analizar cada URL encontrada
-        for url in crawler.get_discovered_urls():
+        # Analizar URLs descubiertas
+        for url in crawler.visited_urls:
             # Analizar JavaScript
             js_findings = await detector.analyze_js(url)
-            for finding in js_findings:
-                await report_generator.add_finding(finding)
+            if js_findings:
+                report_generator.add_findings("javascript_analysis", js_findings)
             
             # Analizar contenido dinámico
             dynamic_findings = await detector.analyze_dynamic_content(url)
-            for finding in dynamic_findings:
-                await report_generator.add_finding(finding)
+            if dynamic_findings:
+                report_generator.add_findings("dynamic_analysis", dynamic_findings)
             
             # Probar vulnerabilidades
             if attack_engine.interactsh_url:
                 vuln_findings = await attack_engine.test_vulnerabilities(url)
-                for finding in vuln_findings:
-                    await report_generator.add_finding(finding)
+                if vuln_findings:
+                    report_generator.add_findings("vulnerability_scan", vuln_findings)
             
             # Guardar capturas de pantalla si está habilitado
             if save_screenshots:
@@ -136,7 +129,7 @@ async def run_scan(
                 await crawler.save_response(url)
         
         # Generar reporte final
-        await report_generator.generate_report()
+        await report_generator.generate_report("reporte_final")
         
     except Exception as e:
         logging.error(f"Error durante el escaneo: {e}")
