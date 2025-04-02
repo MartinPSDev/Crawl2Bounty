@@ -104,35 +104,49 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
         
         # Analizar URLs descubiertas
         for url in crawler.visited_urls:
-            # Analizar JavaScript
-            js_findings = await detector.analyze_js(url)
-            if js_findings:
-                report_generator.add_findings("javascript_analysis", js_findings)
-            
-            # Analizar contenido dinámico
-            dynamic_findings = await detector.analyze_dynamic_content(url)
-            if dynamic_findings:
-                report_generator.add_findings("dynamic_analysis", dynamic_findings)
-            
-            # Probar vulnerabilidades
-            if attack_engine.interactsh_url:
-                vuln_findings = await attack_engine.test_vulnerabilities(url)
-                if vuln_findings:
-                    report_generator.add_findings("vulnerability_scan", vuln_findings)
-            
-            # Guardar capturas de pantalla si está habilitado
-            if save_screenshots:
-                await crawler.save_screenshot(url)
-            
-            # Guardar respuestas si está habilitado
-            if save_responses:
-                await crawler.save_response(url)
+            try:
+                # Analizar JavaScript
+                js_findings = await detector.analyze_js(url)
+                if js_findings:
+                    report_generator.add_findings("javascript_analysis", js_findings)
+                
+                # Analizar contenido dinámico
+                dynamic_findings = await detector.analyze_dynamic_content(url)
+                if dynamic_findings:
+                    report_generator.add_findings("dynamic_analysis", dynamic_findings)
+                
+                # Probar vulnerabilidades
+                if attack_engine.interactsh_url:
+                    vuln_findings = await attack_engine.test_vulnerabilities(url)
+                    if vuln_findings:
+                        report_generator.add_findings("vulnerability_scan", vuln_findings)
+                
+                # Guardar capturas de pantalla si está habilitado
+                if save_screenshots:
+                    await crawler.save_screenshot(url)
+                
+                # Guardar respuestas si está habilitado
+                if save_responses:
+                    await crawler.save_response(url)
+                    
+            except asyncio.CancelledError:
+                logging.info("Escaneo interrumpido por el usuario")
+                raise
+            except Exception as e:
+                logging.error(f"Error procesando URL {url}: {e}")
+                continue
         
         # Generar reporte final
         await report_generator.generate_report("reporte_final")
         
+    except asyncio.CancelledError:
+        logging.info("Escaneo interrumpido por el usuario")
+        # Asegurar que se genere un reporte parcial
+        await report_generator.generate_report("reporte_parcial")
     except Exception as e:
         logging.error(f"Error durante el escaneo: {e}")
+        # Asegurar que se genere un reporte parcial
+        await report_generator.generate_report("reporte_error")
         raise
 
 def main():
@@ -181,6 +195,16 @@ def main():
         detector = SmartDetector(console_manager=console)
         attack_engine = AttackEngine(console_manager=console, smart_detector=detector, interactsh_url=args.interactsh_url)
         
+        # Configurar manejador de señales
+        def signal_handler(signum, frame):
+            console.print_warning("\nSeñal de interrupción recibida. Finalizando escaneo...")
+            # Cancelar todas las tareas asíncronas
+            for task in asyncio.all_tasks():
+                task.cancel()
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
         # Ejecutar el escaneo
         asyncio.run(run_scan(
             crawler=crawler,
@@ -191,6 +215,9 @@ def main():
             save_responses=args.responses
         ))
         
+    except KeyboardInterrupt:
+        console.print_warning("\nEscaneo interrumpido por el usuario")
+        sys.exit(0)
     except Exception as e:
         logging.error(f"Error during scan: {e}")
         sys.exit(1)
