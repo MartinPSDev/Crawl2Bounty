@@ -1,4 +1,4 @@
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 import json
 from datetime import datetime
 import threading
@@ -10,8 +10,11 @@ from console_manager import ConsoleManager
 from urllib.parse import urlparse
 
 class ReportGenerator:
-    def __init__(self, console_manager: ConsoleManager):
+    def __init__(self, console_manager: ConsoleManager, output_prefix: str = "crawl2bounty", save_screenshots: bool = False, save_responses: bool = False):
         self.console = console_manager
+        self.output_prefix = output_prefix
+        self.save_screenshots = save_screenshots
+        self.save_responses = save_responses
         self.findings: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self.metadata = {
             "scan_start_time": time.time(),
@@ -23,7 +26,22 @@ class ReportGenerator:
             "scan_duration_seconds": None,
             "scan_status": "initiated"
         }
-        self.console.print_debug("ReportGenerator initialized.")
+        
+        # Crear directorio de logs si no existe
+        self.logs_dir = "logs"
+        os.makedirs(self.logs_dir, exist_ok=True)
+        
+        # Inicializar archivos de log
+        self.realtime_log_file = os.path.join(self.logs_dir, f"{output_prefix}_realtime.log")
+        self.findings_log_file = os.path.join(self.logs_dir, f"{output_prefix}_findings.log")
+        
+        # Crear/limpiar archivos de log
+        with open(self.realtime_log_file, 'w', encoding='utf-8') as f:
+            f.write(f"[{datetime.now().isoformat()}] Iniciando escaneo\n")
+        with open(self.findings_log_file, 'w', encoding='utf-8') as f:
+            f.write(f"[{datetime.now().isoformat()}] Iniciando registro de hallazgos\n")
+            
+        self.console.print_debug("ReportGenerator inicializado con logging en tiempo real.")
 
     def add_findings(self, section: str, findings: List[Dict[str, Any]]):
         """Adds a list of findings under a specific section, ensuring severity."""
@@ -33,13 +51,60 @@ class ReportGenerator:
         processed_findings = []
         for finding in findings:
             if isinstance(finding, dict):
-                processed_findings.append(self._ensure_severity(finding))
+                processed_finding = self._ensure_severity(finding)
+                processed_findings.append(processed_finding)
+                
+                # Registrar hallazgo en tiempo real
+                self._log_finding(processed_finding)
             else:
-                self.console.print_warning(f"Ignored non-dict finding in section '{section}': {str(finding)[:100]}")
+                self.console.print_warning(f"Ignorado hallazgo no-dict en sección '{section}': {str(finding)[:100]}")
 
         if processed_findings:
             self.findings[section].extend(processed_findings)
-            self.console.print_debug(f"Added {len(processed_findings)} findings to report section '{section}'")
+            self.console.print_debug(f"Agregados {len(processed_findings)} hallazgos a la sección '{section}'")
+
+    def _log_finding(self, finding: dict):
+        """Registra un hallazgo en el archivo de log en tiempo real."""
+        try:
+            timestamp = datetime.now().isoformat()
+            severity = finding.get("severity", "INFO")
+            finding_type = finding.get("type", "unknown")
+            url = finding.get("url", "N/A")
+            details = finding.get("details", {})
+            
+            # Formatear detalles para el log
+            details_str = ""
+            if isinstance(details, dict):
+                for k, v in details.items():
+                    details_str += f"\n  {k}: {v}"
+            else:
+                details_str = str(details)
+            
+            log_entry = f"[{timestamp}] [{severity}] {finding_type}\nURL: {url}{details_str}\n{'='*80}\n"
+            
+            with open(self.findings_log_file, 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+                
+        except Exception as e:
+            self.console.print_error(f"Error registrando hallazgo en log: {e}")
+
+    def log_realtime_event(self, event_type: str, message: str, details: Optional[Dict] = None):
+        """Registra un evento en tiempo real en el archivo de log."""
+        try:
+            timestamp = datetime.now().isoformat()
+            log_entry = f"[{timestamp}] [{event_type}] {message}"
+            
+            if details:
+                for k, v in details.items():
+                    log_entry += f"\n  {k}: {v}"
+            
+            log_entry += "\n" + "-"*80 + "\n"
+            
+            with open(self.realtime_log_file, 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+                
+        except Exception as e:
+            self.console.print_error(f"Error registrando evento en log: {e}")
 
     def _ensure_severity(self, finding: dict) -> dict:
         """Assigns a default severity if missing or invalid, based on type."""
@@ -56,20 +121,29 @@ class ReportGenerator:
         return finding
 
     def set_scan_target(self, target: str):
+        """Establece el objetivo del escaneo y lo registra en los logs."""
         self.metadata["scan_target"] = target
+        self.log_realtime_event("SCAN_TARGET", f"Objetivo establecido: {target}")
 
     def set_scan_status(self, status: str):
-        """Sets the final scan status (e.g., completed, interrupted, failed)."""
+        """Establece el estado del escaneo y lo registra en los logs."""
         self.metadata["scan_status"] = status
+        self.log_realtime_event("SCAN_STATUS", f"Estado del escaneo: {status}")
 
     def finalize_report(self):
-        """Calculates duration and sets final timestamps."""
+        """Finaliza el reporte y registra la finalización en los logs."""
         if self.metadata["scan_end_time"] is None:
             end_time = time.time()
             self.metadata["scan_end_time"] = end_time
             self.metadata["scan_end_iso"] = datetime.now().isoformat()
             if self.metadata["scan_start_time"]:
                 self.metadata["scan_duration_seconds"] = round(end_time - self.metadata["scan_start_time"], 2)
+            
+            # Registrar finalización en logs
+            self.log_realtime_event("SCAN_COMPLETE", "Escaneo finalizado", {
+                "duración_segundos": self.metadata["scan_duration_seconds"],
+                "total_hallazgos": sum(len(findings) for findings in self.findings.values())
+            })
 
     def generate_summary(self) -> dict:
         """Generates a summary dictionary from all collected findings."""

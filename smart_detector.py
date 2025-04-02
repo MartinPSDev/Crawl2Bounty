@@ -14,6 +14,8 @@ from playwright.async_api import Page, Error as PlaywrightError
 class SmartDetector:
     def __init__(self, console_manager: ConsoleManager, interactsh_url: Optional[str] = None):
         # Use ConsoleManager for user output
+        if not isinstance(console_manager, ConsoleManager):
+            raise ValueError("console_manager must be an instance of ConsoleManager")
         self.console = console_manager
         # Ensure verbose is enabled for debug messages
         self.console.verbose = True
@@ -526,3 +528,292 @@ class SmartDetector:
                  self.console.print_info(log_msg)
 
         return log_entry
+
+    async def analyze_url(self, url: str) -> None:
+        """Analyze a URL for potential vulnerabilities and interesting patterns."""
+        try:
+            self.console.print_debug(f"Analyzing URL: {url}")
+            
+            # Parse URL
+            parsed_url = urllib.parse.urlparse(url)
+            
+            # Check for interesting file extensions
+            file_extensions = ['.php', '.asp', '.aspx', '.jsp', '.cgi', '.pl', '.py', '.rb', '.exe', '.dll', '.config', '.xml', '.json', '.yaml', '.yml', '.ini', '.env', '.bak', '.old', '.backup']
+            path = parsed_url.path.lower()
+            for ext in file_extensions:
+                if path.endswith(ext):
+                    self.console.print_warning(f"Found potentially sensitive file extension: {ext} in {url}")
+            
+            # Check for interesting parameters
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            sensitive_params = ['id', 'user', 'admin', 'password', 'token', 'key', 'secret', 'file', 'path', 'dir', 'url', 'redirect', 'next', 'target', 'dest']
+            for param in query_params:
+                if any(sensitive in param.lower() for sensitive in sensitive_params):
+                    self.console.print_warning(f"Found potentially sensitive parameter: {param} in {url}")
+            
+            # Check for interesting paths
+            sensitive_paths = ['admin', 'login', 'register', 'api', 'backup', 'config', 'database', 'debug', 'test', 'dev', 'staging', 'beta']
+            path_parts = path.split('/')
+            for part in path_parts:
+                if any(sensitive in part.lower() for sensitive in sensitive_paths):
+                    self.console.print_warning(f"Found potentially sensitive path component: {part} in {url}")
+            
+            # Check for interesting subdomains
+            subdomain = parsed_url.netloc.split('.')[0]
+            sensitive_subdomains = ['admin', 'api', 'dev', 'staging', 'test', 'beta', 'internal', 'secure', 'vpn', 'mail', 'ftp', 'smtp', 'pop', 'imap']
+            if any(sensitive in subdomain.lower() for sensitive in sensitive_subdomains):
+                self.console.print_warning(f"Found potentially sensitive subdomain: {subdomain} in {url}")
+            
+            # Check for interesting ports
+            if ':' in parsed_url.netloc:
+                port = parsed_url.netloc.split(':')[1]
+                if port not in ['80', '443', '8080']:
+                    self.console.print_warning(f"Found non-standard port: {port} in {url}")
+            
+            # Check for interesting protocols
+            if parsed_url.scheme not in ['http', 'https']:
+                self.console.print_warning(f"Found non-standard protocol: {parsed_url.scheme} in {url}")
+            
+            # Check for interesting fragments
+            if parsed_url.fragment:
+                self.console.print_warning(f"Found URL fragment: {parsed_url.fragment} in {url}")
+            
+            # Check for interesting encodings
+            encoded_chars = ['%', '\\u', '\\x', '\\0', '\\n', '\\r', '\\t']
+            for char in encoded_chars:
+                if char in url:
+                    self.console.print_warning(f"Found encoded characters in URL: {url}")
+                    break
+            
+            # Check for interesting patterns
+            patterns = [
+                (r'\d{4}', 'Year pattern'),
+                (r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', 'IP address'),
+                (r'[a-fA-F0-9]{32,}', 'Hash pattern'),
+                (r'[a-zA-Z0-9_-]{20,}', 'Long token pattern'),
+                (r'[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}\.[a-zA-Z0-9_-]{8,}', 'JWT pattern')
+            ]
+            
+            for pattern, description in patterns:
+                if re.search(pattern, url):
+                    self.console.print_warning(f"Found {description} in URL: {url}")
+            
+            self.console.print_debug(f"URL analysis completed for: {url}")
+            
+        except Exception as e:
+            self.console.print_error(f"Error analyzing URL {url}: {e}")
+
+    async def analyze_js(self, js_content: str) -> None:
+        """Analyze JavaScript content for potential vulnerabilities and interesting patterns."""
+        try:
+            self.console.print_debug("Analyzing JavaScript content...")
+            
+            # Check for sensitive functions and APIs
+            sensitive_functions = [
+                'eval', 'Function', 'setTimeout', 'setInterval', 'document.write',
+                'innerHTML', 'outerHTML', 'insertAdjacentHTML', 'document.domain',
+                'localStorage', 'sessionStorage', 'indexedDB', 'WebSocket',
+                'XMLHttpRequest', 'fetch', 'navigator.sendBeacon'
+            ]
+            
+            for func in sensitive_functions:
+                if func in js_content:
+                    self.console.print_warning(f"Found sensitive JavaScript function: {func}")
+            
+            # Check for potential XSS vectors
+            xss_patterns = [
+                r'document\.write\s*\(',
+                r'innerHTML\s*=',
+                r'outerHTML\s*=',
+                r'insertAdjacentHTML\s*\(',
+                r'eval\s*\(',
+                r'Function\s*\(',
+                r'setTimeout\s*\([^)]*function',
+                r'setInterval\s*\([^)]*function'
+            ]
+            
+            for pattern in xss_patterns:
+                if re.search(pattern, js_content):
+                    self.console.print_warning(f"Found potential XSS vector: {pattern}")
+            
+            # Check for sensitive data
+            sensitive_patterns = [
+                (r'password\s*[:=]', 'Password field'),
+                (r'token\s*[:=]', 'Token field'),
+                (r'api[_-]?key\s*[:=]', 'API key'),
+                (r'secret\s*[:=]', 'Secret field'),
+                (r'private[_-]?key\s*[:=]', 'Private key'),
+                (r'jwt\s*[:=]', 'JWT token')
+            ]
+            
+            for pattern, description in sensitive_patterns:
+                if re.search(pattern, js_content, re.IGNORECASE):
+                    self.console.print_warning(f"Found {description} in JavaScript")
+            
+            # Check for potential DOM-based vulnerabilities
+            dom_patterns = [
+                r'location\.hash',
+                r'location\.search',
+                r'location\.href',
+                r'document\.URL',
+                r'document\.documentURI',
+                r'window\.name'
+            ]
+            
+            for pattern in dom_patterns:
+                if re.search(pattern, js_content):
+                    self.console.print_warning(f"Found potential DOM-based vulnerability: {pattern}")
+            
+            # Check for potential prototype pollution
+            if 'Object.prototype' in js_content or '__proto__' in js_content:
+                self.console.print_warning("Found potential prototype pollution vector")
+            
+            # Check for potential deserialization
+            if 'JSON.parse' in js_content or 'eval(' in js_content:
+                self.console.print_warning("Found potential deserialization vector")
+            
+            self.console.print_debug("JavaScript analysis completed")
+            
+        except Exception as e:
+            self.console.print_error(f"Error analyzing JavaScript content: {e}")
+
+    async def analyze_dynamic_content(self, page: Page) -> None:
+        """Analyze dynamic content and behavior of the page."""
+        try:
+            self.console.print_debug("Analyzing dynamic content...")
+            
+            # Check for dynamic content loading
+            dynamic_patterns = [
+                r'innerHTML\s*=',
+                r'outerHTML\s*=',
+                r'insertAdjacentHTML\s*\(',
+                r'document\.write\s*\(',
+                r'appendChild\s*\(',
+                r'insertBefore\s*\(',
+                r'replaceChild\s*\(',
+                r'insertAdjacentElement\s*\(',
+                r'insertAdjacentText\s*\('
+            ]
+            
+            # Check for dynamic event handlers
+            event_patterns = [
+                r'on\w+\s*=',
+                r'addEventListener\s*\(',
+                r'attachEvent\s*\(',
+                r'\.on\s*\(',
+                r'\.bind\s*\(',
+                r'\.delegate\s*\(',
+                r'\.live\s*\('
+            ]
+            
+            # Check for dynamic script loading
+            script_patterns = [
+                r'createElement\s*\(\s*[\'"]script[\'"]',
+                r'new\s+Script\s*\(',
+                r'\.src\s*=\s*[\'"]',
+                r'\.href\s*=\s*[\'"]',
+                r'\.setAttribute\s*\(\s*[\'"]src[\'"]',
+                r'\.setAttribute\s*\(\s*[\'"]href[\'"]'
+            ]
+            
+            # Check for dynamic AJAX/Fetch calls
+            ajax_patterns = [
+                r'XMLHttpRequest\s*\(',
+                r'fetch\s*\(',
+                r'\.ajax\s*\(',
+                r'\.get\s*\(',
+                r'\.post\s*\(',
+                r'\.put\s*\(',
+                r'\.delete\s*\('
+            ]
+            
+            # Check for dynamic iframe creation
+            iframe_patterns = [
+                r'createElement\s*\(\s*[\'"]iframe[\'"]',
+                r'new\s+IFrame\s*\(',
+                r'\.setAttribute\s*\(\s*[\'"]src[\'"]'
+            ]
+            
+            # Check for dynamic form creation
+            form_patterns = [
+                r'createElement\s*\(\s*[\'"]form[\'"]',
+                r'new\s+FormData\s*\(',
+                r'\.submit\s*\(',
+                r'\.reset\s*\('
+            ]
+            
+            # Check for dynamic storage usage
+            storage_patterns = [
+                r'localStorage\s*\.',
+                r'sessionStorage\s*\.',
+                r'indexedDB\s*\.',
+                r'\.cookie\s*=',
+                r'\.setCookie\s*\(',
+                r'\.getCookie\s*\('
+            ]
+            
+            # Check for dynamic DOM manipulation
+            dom_patterns = [
+                r'querySelector\s*\(',
+                r'querySelectorAll\s*\(',
+                r'getElementById\s*\(',
+                r'getElementsByClassName\s*\(',
+                r'getElementsByTagName\s*\(',
+                r'getElementsByName\s*\(',
+                r'closest\s*\(',
+                r'matches\s*\('
+            ]
+            
+            # Combine all patterns
+            all_patterns = {
+                'Dynamic Content Loading': dynamic_patterns,
+                'Event Handlers': event_patterns,
+                'Script Loading': script_patterns,
+                'AJAX/Fetch Calls': ajax_patterns,
+                'Iframe Creation': iframe_patterns,
+                'Form Creation': form_patterns,
+                'Storage Usage': storage_patterns,
+                'DOM Manipulation': dom_patterns
+            }
+            
+            # Get page content
+            content = await page.content()
+            
+            # Check each category of patterns
+            for category, patterns in all_patterns.items():
+                for pattern in patterns:
+                    if re.search(pattern, content):
+                        self.console.print_warning(f"Found {category} pattern: {pattern}")
+            
+            # Check for dynamic content in iframes
+            iframes = await page.query_selector_all('iframe')
+            for iframe in iframes:
+                try:
+                    frame = await iframe.content_frame()
+                    if frame:
+                        frame_content = await frame.content()
+                        for category, patterns in all_patterns.items():
+                            for pattern in patterns:
+                                if re.search(pattern, frame_content):
+                                    self.console.print_warning(f"Found {category} pattern in iframe: {pattern}")
+                except Exception as e:
+                    self.console.print_error(f"Error analyzing iframe content: {e}")
+            
+            # Check for dynamic content in shadow DOM
+            shadow_hosts = await page.query_selector_all('*')
+            for host in shadow_hosts:
+                try:
+                    shadow = await host.evaluate('el => el.shadowRoot')
+                    if shadow:
+                        shadow_content = await host.evaluate('el => el.shadowRoot.innerHTML')
+                        for category, patterns in all_patterns.items():
+                            for pattern in patterns:
+                                if re.search(pattern, shadow_content):
+                                    self.console.print_warning(f"Found {category} pattern in shadow DOM: {pattern}")
+                except Exception as e:
+                    continue  # Skip elements without shadow DOM
+            
+            self.console.print_debug("Dynamic content analysis completed")
+            
+        except Exception as e:
+            self.console.print_error(f"Error analyzing dynamic content: {e}")

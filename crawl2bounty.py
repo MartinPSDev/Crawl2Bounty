@@ -133,7 +133,15 @@ def main():
     setup_signal_handlers(console_manager)
     
     try:
-        # Initialize crawler
+        # Initialize report generator
+        report_generator = ReportGenerator(
+            console_manager=console_manager,
+            output_prefix=args.output or "crawl2bounty",
+            save_screenshots=args.save_screenshots,
+            save_responses=args.save_responses
+        )
+        
+        # Initialize crawler with report generator
         crawler = SmartCrawler(
             base_url=args.url,
             max_depth=args.depth,
@@ -141,14 +149,8 @@ def main():
             rate_limit=args.rate_limit,
             excluded_patterns=None,
             included_patterns=None,
-            interactsh_url=None
-        )
-        
-        # Initialize report generator
-        report_generator = ReportGenerator(
-            output_prefix=args.output or "crawl2bounty",
-            save_screenshots=args.save_screenshots,
-            save_responses=args.save_responses
+            interactsh_url=None,
+            report_generator=report_generator
         )
         
         # Display configuration
@@ -171,7 +173,8 @@ def main():
         # Start crawling
         asyncio.run(crawler.start_crawl(args.url, args.depth))
         
-        # Generate report
+        # Generate final report
+        report_generator.finalize_report()
         report_generator.generate_report()
         
         console_manager.print_success("Escaneo completado exitosamente")

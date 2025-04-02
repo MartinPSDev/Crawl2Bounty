@@ -32,16 +32,20 @@ class SmartCrawler:
                  rate_limit: float = 1.0,
                  excluded_patterns: List[str] = None,
                  included_patterns: List[str] = None,
-                 interactsh_url: Optional[str] = None):
+                 interactsh_url: Optional[str] = None,
+                 report_generator: Optional[ReportGenerator] = None):
         """Initialize the SmartCrawler with configuration parameters."""
         # Initialize console manager with verbose enabled
         self.console = ConsoleManager(verbose=True)
         
+        # Store report generator
+        self.report_generator = report_generator
+        
         # Initialize SmartDetector with console manager
         self.detector = SmartDetector(console_manager=self.console)
         
-        # Initialize AttackEngine with SmartDetector
-        self.attack_engine = AttackEngine(self.detector, interactsh_url)
+        # Initialize AttackEngine with console manager and SmartDetector
+        self.attack_engine = AttackEngine(console_manager=self.console, smart_detector=self.detector, interactsh_url=interactsh_url)
         
         # Set configuration parameters
         self.base_url = base_url
@@ -70,7 +74,8 @@ class SmartCrawler:
         
         try:
             # Initialize browser and page
-            self.browser = await async_playwright().chromium.launch(headless=True)
+            playwright = await async_playwright().start()
+            self.browser = await playwright.chromium.launch(headless=True)
             self.context = await self.browser.new_context()
             self.page = await self.context.new_page()
             
@@ -98,6 +103,7 @@ class SmartCrawler:
             await self.page.close()
             await self.context.close()
             await self.browser.close()
+            await playwright.stop()
             
             self.console.print_info("Crawl completed successfully")
             
@@ -110,6 +116,8 @@ class SmartCrawler:
                 await self.context.close()
             if hasattr(self, 'browser') and not self.browser.is_closed():
                 await self.browser.close()
+            if 'playwright' in locals():
+                await playwright.stop()
 
     async def _crawl(self, page: Page, url: str, depth: int):
         """Recursive function to crawl the website."""
@@ -142,6 +150,12 @@ class SmartCrawler:
 
     async def _process_single_url(self, url: str, depth: int):
         """Process a single URL, including navigation, analysis, and interaction."""
+        if self.report_generator:
+            self.report_generator.log_realtime_event("URL_PROCESSING", f"Procesando URL: {url}", {
+                "depth": depth,
+                "timestamp": datetime.now().isoformat()
+            })
+        
         self.console.print_info(f"Processing URL: {url} (depth: {depth})")
         
         try:
@@ -149,51 +163,84 @@ class SmartCrawler:
             await self.page.goto(url, wait_until="networkidle", timeout=self.timeout)
             await self.page.wait_for_load_state("load", timeout=self.timeout)
             
+            if self.report_generator:
+                self.report_generator.log_realtime_event("PAGE_LOADED", f"Página cargada: {url}", {
+                    "title": await self.page.title(),
+                    "status": "success"
+                })
+            
             # Static JS analysis
             self.console.print_debug("Performing static JS analysis...")
             js_content = await self.page.content()
-            await self.detector.analyze_js(js_content)
+            js_findings = await self.detector.analyze_js(js_content)
+            
+            if self.report_generator and js_findings:
+                self.report_generator.add_findings("javascript_analysis", js_findings)
             
             # Basic vulnerability checks
             self.console.print_debug("Performing basic vulnerability checks...")
             parsed_url = urlparse(url)
             params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
             if params:
-                await self.attack_engine.test_vulnerability(url, "GET", params=params)
+                vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params)
+                if self.report_generator and vuln_findings:
+                    self.report_generator.add_findings("vulnerability_scan", vuln_findings)
             
             # Dynamic analysis
             self.console.print_debug("Performing dynamic analysis...")
-            await self.detector.analyze_dynamic_content(self.page)
+            dynamic_findings = await self.detector.analyze_dynamic_content(self.page)
+            if self.report_generator and dynamic_findings:
+                self.report_generator.add_findings("dynamic_analysis", dynamic_findings)
             
             # Handle interactive elements
             self.console.print_debug("Handling interactive elements...")
-            await self.handle_interactive_elements(self.page, url, depth)
+            interactive_findings = await self.handle_interactive_elements(self.page, url, depth)
+            if self.report_generator and interactive_findings:
+                self.report_generator.add_findings("interactive_elements", interactive_findings)
             
             # Handle forms
             self.console.print_debug("Handling forms...")
             forms = await self.page.query_selector_all('form')
             for form in forms:
-                await self.handle_form_submission(self.page, form, url, depth)
+                form_findings = await self.handle_form_submission(self.page, form, url, depth)
+                if self.report_generator and form_findings:
+                    self.report_generator.add_findings("form_analysis", form_findings)
             
             # Handle search forms
             self.console.print_debug("Handling search forms...")
-            await self.handle_search_forms(self.page, url, depth)
+            search_findings = await self.handle_search_forms(self.page, url, depth)
+            if self.report_generator and search_findings:
+                self.report_generator.add_findings("search_analysis", search_findings)
             
             # Gather new links
             self.console.print_debug("Gathering new links...")
             links = await self.page.query_selector_all('a[href]')
+            new_urls = []
             for link in links:
                 href = await link.get_attribute('href')
                 if href:
                     full_url = urljoin(url, href)
                     if self.is_in_scope(full_url):
+                        new_urls.append(full_url)
                         await self.add_to_crawl_queue(full_url, depth + 1)
+            
+            if self.report_generator:
+                self.report_generator.log_realtime_event("LINKS_FOUND", f"Enlaces encontrados en {url}", {
+                    "total_links": len(new_urls),
+                    "new_urls": new_urls[:5]  # Limitamos a 5 URLs para el log
+                })
             
             # Wait for rate limiting
             await asyncio.sleep(self.rate_limit_delay)
             
         except Exception as e:
-            self.console.print_warning(f"Error processing {url}: {e}")
+            error_msg = f"Error processing {url}: {str(e)}"
+            self.console.print_warning(error_msg)
+            if self.report_generator:
+                self.report_generator.log_realtime_event("ERROR", error_msg, {
+                    "url": url,
+                    "error_type": type(e).__name__
+                })
 
     async def handle_form_submission(self, page: Page, base_url: str, form_data: dict, depth: int):
         """Fills form, triggers vuln tests, optionally submits via Playwright."""
@@ -425,30 +472,53 @@ class SmartCrawler:
             self.console.print_warning(f"Error analyzing URL {normalized_url}: {e}")
 
     def is_in_scope(self, url: str) -> bool:
-        """Check if a URL is within the crawl scope."""
+        """Verifica si la URL está dentro del alcance definido."""
         try:
-            # Normalize URL
-            normalized_url = self._normalize_url(url)
+            # Obtener el dominio base del target
+            target_domain = urlparse(self.base_url).netloc.lower()
             
-            # Check if URL matches base domain
-            parsed_url = urlparse(normalized_url)
-            if not parsed_url.netloc:
+            # Lista de dominios de redes sociales a excluir
+            social_networks = [
+                'facebook.com', 'fb.com', 'instagram.com', 'twitter.com', 'x.com',
+                'linkedin.com', 'youtube.com', 'tiktok.com', 'pinterest.com',
+                'reddit.com', 'snapchat.com', 'tumblr.com', 'flickr.com',
+                'vimeo.com', 'whatsapp.com', 'telegram.org', 'discord.com',
+                'twitch.tv', 'medium.com', 'github.com', 'gitlab.com'
+            ]
+            
+            # Parsear la URL a verificar
+            parsed_url = urlparse(url)
+            url_domain = parsed_url.netloc.lower()
+            
+            # Verificar si es una red social
+            if any(social in url_domain for social in social_networks):
+                self.console.print_debug(f"URL de red social excluida: {url}")
                 return False
-                
-            # Check if URL is in excluded patterns
-            for pattern in self.excluded_patterns:
-                if pattern in normalized_url:
-                    return False
-                    
-            # Check if URL is in included patterns
+            
+            # Verificar si el dominio coincide con el target
+            if target_domain not in url_domain:
+                self.console.print_debug(f"URL fuera de scope excluida: {url}")
+                return False
+            
+            # Verificar patrones de exclusión si existen
+            if self.excluded_patterns:
+                for pattern in self.excluded_patterns:
+                    if re.search(pattern, url, re.IGNORECASE):
+                        self.console.print_debug(f"URL coincidente con patrón de exclusión: {url}")
+                        return False
+            
+            # Verificar patrones de inclusión si existen
             if self.included_patterns:
-                return any(pattern in normalized_url for pattern in self.included_patterns)
-                
-            # Default to True if no included patterns specified
+                for pattern in self.included_patterns:
+                    if re.search(pattern, url, re.IGNORECASE):
+                        self.console.print_debug(f"URL coincidente con patrón de inclusión: {url}")
+                        return True
+                return False
+            
             return True
             
         except Exception as e:
-            self.console.print_warning(f"Error checking URL scope: {e}")
+            self.console.print_error(f"Error verificando scope de URL {url}: {e}")
             return False
 
     def _normalize_url(self, url: str) -> str:
