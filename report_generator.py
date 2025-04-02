@@ -10,7 +10,7 @@ from console_manager import ConsoleManager
 from urllib.parse import urlparse
 
 class ReportGenerator:
-    def __init__(self, console_manager: ConsoleManager, output_file: str = None):
+    def __init__(self, console_manager: ConsoleManager, output_file: str = None, domain_dir: str = None):
         """Initialize the ReportGenerator with console manager."""
         self.console = console_manager
         self.findings = []
@@ -29,21 +29,20 @@ class ReportGenerator:
             }
         }
         
-        # Crear directorios si no existen
-        os.makedirs('reports', exist_ok=True)
-        os.makedirs('logs', exist_ok=True)
+        # Usar el directorio del dominio si está disponible
+        self.domain_dir = domain_dir or 'reports'
         
         # Configurar nombres de archivos
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self.report_file = f"reports/report_{timestamp}.json"
-        self.findings_log_file = f"logs/findings_{timestamp}.log"
-        self.events_log_file = f"logs/events_{timestamp}.log"
+        self.report_file = os.path.join(self.domain_dir, f"report_{timestamp}.json")
+        self.findings_log_file = os.path.join(self.domain_dir, 'logs', f"findings_{timestamp}.log")
+        self.events_log_file = os.path.join(self.domain_dir, 'logs', f"events_{timestamp}.log")
         
         # Si se especifica un archivo de salida, usarlo
         if output_file:
-            self.report_file = f"reports/{output_file}.json"
-            self.findings_log_file = f"logs/{output_file}_findings.log"
-            self.events_log_file = f"logs/{output_file}_events.log"
+            self.report_file = os.path.join(self.domain_dir, f"{output_file}.json")
+            self.findings_log_file = os.path.join(self.domain_dir, 'logs', f"{output_file}_findings.log")
+            self.events_log_file = os.path.join(self.domain_dir, 'logs', f"{output_file}_events.log")
 
     def add_findings(self, section: str, findings: List[Dict[str, Any]]):
         """Adds a list of findings under a specific section, ensuring severity."""

@@ -20,13 +20,30 @@ from attack_engine import AttackEngine
 MAX_DEPTH = 10  # Profundidad máxima recomendada
 MIN_DEPTH = 1   # Profundidad mínima
 
-def setup_logging(verbose: bool = False):
+def create_domain_directory(url: str) -> str:
+    """Crea un directorio para el dominio y retorna su ruta."""
+    try:
+        # Obtener el dominio de la URL
+        domain = urlparse(url).netloc.lower()
+        
+        # Crear directorio para el dominio
+        domain_dir = os.path.join('reports', domain)
+        os.makedirs(domain_dir, exist_ok=True)
+        
+        # Crear subdirectorios
+        os.makedirs(os.path.join(domain_dir, 'logs'), exist_ok=True)
+        os.makedirs(os.path.join(domain_dir, 'screenshots'), exist_ok=True)
+        os.makedirs(os.path.join(domain_dir, 'responses'), exist_ok=True)
+        
+        return domain_dir
+    except Exception as e:
+        logging.error(f"Error creando directorio para el dominio: {e}")
+        return 'reports'
+
+def setup_logging(domain_dir: str, verbose: bool = False):
     """Configura el sistema de logging."""
     # Configurar nivel de logging basado en el modo verbose
     log_level = logging.DEBUG if verbose else logging.INFO
-    
-    # Crear directorio de logs si no existe
-    os.makedirs('logs', exist_ok=True)
     
     # Configurar formato del log
     log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -34,7 +51,7 @@ def setup_logging(verbose: bool = False):
     
     # Configurar handlers
     handlers = [
-        logging.FileHandler('logs/crawl2bounty.log'),
+        logging.FileHandler(os.path.join(domain_dir, 'logs', 'crawl2bounty.log')),
         logging.StreamHandler()
     ]
     
@@ -167,20 +184,16 @@ def main():
     
     args = parser.parse_args()
     
+    # Crear directorio para el dominio
+    domain_dir = create_domain_directory(args.url)
+    
     # Configurar logging
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler('crawl2bounty.log'),
-            logging.StreamHandler()
-        ]
-    )
+    logger = setup_logging(domain_dir, args.verbose)
     
     try:
         # Inicializar componentes
         console = ConsoleManager(verbose=args.verbose)
-        report_generator = ReportGenerator(console_manager=console, output_file=args.output)
+        report_generator = ReportGenerator(console_manager=console, output_file=args.output, domain_dir=domain_dir)
         crawler = SmartCrawler(
             base_url=args.url,
             max_depth=args.depth,
@@ -190,7 +203,8 @@ def main():
             included_patterns=args.include,
             interactsh_url=args.interactsh_url,
             report_generator=report_generator,
-            force=args.force
+            force=args.force,
+            domain_dir=domain_dir
         )
         detector = SmartDetector(console_manager=console)
         attack_engine = AttackEngine(console_manager=console, smart_detector=detector, interactsh_url=args.interactsh_url)
