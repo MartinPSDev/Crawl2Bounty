@@ -155,12 +155,14 @@ def main():
     parser.add_argument('--responses', action='store_true', help='Save page responses')
     parser.add_argument('--interactsh-url', help='Interactsh URL for OOB testing')
     parser.add_argument('--force', '-f', action='store_true', help='Forzar el análisis de dominios normalmente excluidos (redes sociales, etc.)')
+    parser.add_argument('-o', '--output', help='Nombre del archivo de salida para el reporte')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Modo verbose para mostrar más información')
     
     args = parser.parse_args()
     
     # Configurar logging
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler('crawl2bounty.log'),
@@ -170,8 +172,8 @@ def main():
     
     try:
         # Inicializar componentes
-        console = ConsoleManager(verbose=True)
-        report_generator = ReportGenerator(console_manager=console)
+        console = ConsoleManager(verbose=args.verbose)
+        report_generator = ReportGenerator(console_manager=console, output_file=args.output)
         crawler = SmartCrawler(
             base_url=args.url,
             max_depth=args.depth,
@@ -181,7 +183,7 @@ def main():
             included_patterns=args.include,
             interactsh_url=args.interactsh_url,
             report_generator=report_generator,
-            force=args.force  # Pasar el parámetro force
+            force=args.force
         )
         detector = SmartDetector(console_manager=console)
         attack_engine = AttackEngine(console_manager=console, smart_detector=detector, interactsh_url=args.interactsh_url)
