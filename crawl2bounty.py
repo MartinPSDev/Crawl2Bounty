@@ -94,96 +94,108 @@ def validate_depth(depth: int) -> bool:
     """Valida que la profundidad de rastreo esté dentro de los límites permitidos."""
     return MIN_DEPTH <= depth <= MAX_DEPTH
 
+async def run_scan(
+    crawler: SmartCrawler,
+    detector: SmartDetector,
+    attack_engine: AttackEngine,
+    report_generator: ReportGenerator,
+    save_screenshots: bool,
+    save_responses: bool
+) -> None:
+    """Ejecuta el escaneo completo."""
+    try:
+        # Iniciar el crawler
+        await crawler.start_crawl()
+        
+        # Analizar cada URL encontrada
+        for url in crawler.get_discovered_urls():
+            # Analizar JavaScript
+            js_findings = await detector.analyze_js(url)
+            for finding in js_findings:
+                await report_generator.add_finding(finding)
+            
+            # Analizar contenido dinámico
+            dynamic_findings = await detector.analyze_dynamic_content(url)
+            for finding in dynamic_findings:
+                await report_generator.add_finding(finding)
+            
+            # Probar vulnerabilidades
+            if attack_engine.interactsh_url:
+                vuln_findings = await attack_engine.test_vulnerabilities(url)
+                for finding in vuln_findings:
+                    await report_generator.add_finding(finding)
+            
+            # Guardar capturas de pantalla si está habilitado
+            if save_screenshots:
+                await crawler.save_screenshot(url)
+            
+            # Guardar respuestas si está habilitado
+            if save_responses:
+                await crawler.save_response(url)
+        
+        # Generar reporte final
+        await report_generator.generate_report()
+        
+    except Exception as e:
+        logging.error(f"Error durante el escaneo: {e}")
+        raise
+
 def main():
-    """Main function to run the crawl2bounty."""
-    parser = argparse.ArgumentParser(description='Crawl2Bounty - Web Vulnerability Scanner')
+    """Main function to run the web vulnerability scanner."""
+    parser = argparse.ArgumentParser(description='Web Vulnerability Scanner with Advanced Features')
     parser.add_argument('url', help='Target URL to scan')
-    parser.add_argument('-d', '--depth', type=int, default=3, help='Maximum crawl depth (default: 3)')
-    parser.add_argument('-o', '--output', help='Output file prefix (default: robot_hunter)')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('--depth', type=int, default=3, help='Maximum crawl depth (default: 3)')
+    parser.add_argument('--timeout', type=int, default=30, help='Request timeout in seconds (default: 30)')
     parser.add_argument('--rate-limit', type=float, default=1.0, help='Delay between requests in seconds (default: 1.0)')
-    parser.add_argument('--proxy', help='Proxy server URL (e.g., http://127.0.0.1:8080)')
-    parser.add_argument('--user-agent', help='Custom User-Agent string')
-    parser.add_argument('--no-verify-ssl', action='store_true', help='Disable SSL verification')
-    parser.add_argument('--max-requests', type=int, help='Maximum number of requests to make')
-    parser.add_argument('--save-screenshots', action='store_true', help='Save screenshots of pages')
-    parser.add_argument('--save-responses', action='store_true', help='Save response bodies')
-    parser.add_argument('--threads', type=int, default=4, help='Number of concurrent threads (default: 4)')
+    parser.add_argument('--exclude', nargs='+', help='Patterns to exclude from crawling')
+    parser.add_argument('--include', nargs='+', help='Patterns to include in crawling')
+    parser.add_argument('--screenshots', action='store_true', help='Save screenshots of pages')
+    parser.add_argument('--responses', action='store_true', help='Save page responses')
+    parser.add_argument('--interactsh-url', help='Interactsh URL for OOB testing')
+    parser.add_argument('--force', '-f', action='store_true', help='Forzar el análisis de dominios normalmente excluidos (redes sociales, etc.)')
     
     args = parser.parse_args()
     
-    # Validate target URL
-    if not validate_target_url(args.url):
-        print("Error: URL inválida. Por favor, proporcione una URL válida.")
-        sys.exit(1)
-    
-    # Validate depth
-    if not validate_depth(args.depth):
-        print(f"Error: La profundidad debe estar entre {MIN_DEPTH} y {MAX_DEPTH}.")
-        sys.exit(1)
-    
-    # Setup logging
-    logger = setup_logging(args.verbose)
-    logger.info("Iniciando Crawl2Bounty")
-    
-    # Initialize console manager with verbose enabled
-    console_manager = ConsoleManager(verbose=True)
-    
-    # Setup signal handlers with console manager
-    setup_signal_handlers(console_manager)
+    # Configurar logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('crawl2bounty.log'),
+            logging.StreamHandler()
+        ]
+    )
     
     try:
-        # Initialize report generator
-        report_generator = ReportGenerator(
-            console_manager=console_manager,
-            output_prefix=args.output or "crawl2bounty",
-            save_screenshots=args.save_screenshots,
-            save_responses=args.save_responses
-        )
-        
-        # Initialize crawler with report generator
+        # Inicializar componentes
+        console = ConsoleManager(verbose=True)
+        report_generator = ReportGenerator(console_manager=console)
         crawler = SmartCrawler(
             base_url=args.url,
             max_depth=args.depth,
-            timeout=30,
+            timeout=args.timeout,
             rate_limit=args.rate_limit,
-            excluded_patterns=None,
-            included_patterns=None,
-            interactsh_url=None,
-            report_generator=report_generator
+            excluded_patterns=args.exclude,
+            included_patterns=args.include,
+            interactsh_url=args.interactsh_url,
+            report_generator=report_generator,
+            force=args.force  # Pasar el parámetro force
         )
+        detector = SmartDetector(console_manager=console)
+        attack_engine = AttackEngine(console_manager=console, smart_detector=detector, interactsh_url=args.interactsh_url)
         
-        # Display configuration
-        console_manager.print_info("Configuración del escaneo:")
-        console_manager.print_info(f"URL objetivo: {args.url}")
-        console_manager.print_info(f"Profundidad máxima: {args.depth}")
-        console_manager.print_info(f"Límite de tasa: {args.rate_limit} segundos")
-        if args.proxy:
-            console_manager.print_info(f"Proxy: {args.proxy}")
-        if args.user_agent:
-            console_manager.print_info(f"User-Agent: {args.user_agent}")
-        if args.max_requests:
-            console_manager.print_info(f"Máximo de solicitudes: {args.max_requests}")
-        if args.save_screenshots:
-            console_manager.print_info("Guardando capturas de pantalla")
-        if args.save_responses:
-            console_manager.print_info("Guardando cuerpos de respuesta")
-        console_manager.print_info(f"Hilos concurrentes: {args.threads}")
+        # Ejecutar el escaneo
+        asyncio.run(run_scan(
+            crawler=crawler,
+            detector=detector,
+            attack_engine=attack_engine,
+            report_generator=report_generator,
+            save_screenshots=args.screenshots,
+            save_responses=args.responses
+        ))
         
-        # Start crawling
-        asyncio.run(crawler.start_crawl(args.url, args.depth))
-        
-        # Generate final report
-        report_generator.finalize_report()
-        report_generator.generate_report()
-        
-        console_manager.print_success("Escaneo completado exitosamente")
-        
-    except KeyboardInterrupt:
-        console_manager.print_warning("\nEscaneo interrumpido por el usuario")
-        sys.exit(1)
     except Exception as e:
-        console_manager.print_error(f"Error durante el escaneo: {e}")
+        logging.error(f"Error during scan: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":

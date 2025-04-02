@@ -82,8 +82,13 @@ class ReportGenerator:
             
             log_entry = f"[{timestamp}] [{severity}] {finding_type}\nURL: {url}{details_str}\n{'='*80}\n"
             
+            # Usar with para asegurar que el archivo se cierre correctamente
             with open(self.findings_log_file, 'a', encoding='utf-8') as f:
                 f.write(log_entry)
+                f.flush()  # Forzar la escritura inmediata
+                os.fsync(f.fileno())  # Asegurar que se escriba en el disco
+                
+            self.console.print_debug(f"Hallazgo registrado en tiempo real: {finding_type} en {url}")
                 
         except Exception as e:
             self.console.print_error(f"Error registrando hallazgo en log: {e}")

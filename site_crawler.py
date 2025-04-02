@@ -33,7 +33,8 @@ class SmartCrawler:
                  excluded_patterns: List[str] = None,
                  included_patterns: List[str] = None,
                  interactsh_url: Optional[str] = None,
-                 report_generator: Optional[ReportGenerator] = None):
+                 report_generator: Optional[ReportGenerator] = None,
+                 force: bool = False):
         """Initialize the SmartCrawler with configuration parameters."""
         # Initialize console manager with verbose enabled
         self.console = ConsoleManager(verbose=True)
@@ -54,6 +55,7 @@ class SmartCrawler:
         self.rate_limit_delay = rate_limit
         self.excluded_patterns = excluded_patterns or []
         self.included_patterns = included_patterns or []
+        self.force = force  # Nuevo parámetro para forzar el análisis de dominios excluidos
         
         # Initialize crawl state
         self.crawl_queue = asyncio.Queue()
@@ -176,6 +178,7 @@ class SmartCrawler:
             
             if self.report_generator and js_findings:
                 self.report_generator.add_findings("javascript_analysis", js_findings)
+                self.console.print_debug(f"JS findings added to report: {len(js_findings)}")
             
             # Basic vulnerability checks
             self.console.print_debug("Performing basic vulnerability checks...")
@@ -185,18 +188,21 @@ class SmartCrawler:
                 vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params)
                 if self.report_generator and vuln_findings:
                     self.report_generator.add_findings("vulnerability_scan", vuln_findings)
+                    self.console.print_debug(f"Vulnerability findings added to report: {len(vuln_findings)}")
             
             # Dynamic analysis
             self.console.print_debug("Performing dynamic analysis...")
             dynamic_findings = await self.detector.analyze_dynamic_content(self.page)
             if self.report_generator and dynamic_findings:
                 self.report_generator.add_findings("dynamic_analysis", dynamic_findings)
+                self.console.print_debug(f"Dynamic findings added to report: {len(dynamic_findings)}")
             
             # Handle interactive elements
             self.console.print_debug("Handling interactive elements...")
             interactive_findings = await self.handle_interactive_elements(self.page, url, depth)
             if self.report_generator and interactive_findings:
                 self.report_generator.add_findings("interactive_elements", interactive_findings)
+                self.console.print_debug(f"Interactive findings added to report: {len(interactive_findings)}")
             
             # Handle forms
             self.console.print_debug("Handling forms...")
@@ -205,12 +211,14 @@ class SmartCrawler:
                 form_findings = await self.handle_form_submission(self.page, form, url, depth)
                 if self.report_generator and form_findings:
                     self.report_generator.add_findings("form_analysis", form_findings)
+                    self.console.print_debug(f"Form findings added to report: {len(form_findings)}")
             
             # Handle search forms
             self.console.print_debug("Handling search forms...")
             search_findings = await self.handle_search_forms(self.page, url, depth)
             if self.report_generator and search_findings:
                 self.report_generator.add_findings("search_analysis", search_findings)
+                self.console.print_debug(f"Search findings added to report: {len(search_findings)}")
             
             # Gather new links
             self.console.print_debug("Gathering new links...")
@@ -477,22 +485,47 @@ class SmartCrawler:
             # Obtener el dominio base del target
             target_domain = urlparse(self.base_url).netloc.lower()
             
-            # Lista de dominios de redes sociales a excluir
-            social_networks = [
+            # Lista de dominios a excluir
+            excluded_domains = [
+                # Redes sociales
                 'facebook.com', 'fb.com', 'instagram.com', 'twitter.com', 'x.com',
                 'linkedin.com', 'youtube.com', 'tiktok.com', 'pinterest.com',
                 'reddit.com', 'snapchat.com', 'tumblr.com', 'flickr.com',
                 'vimeo.com', 'whatsapp.com', 'telegram.org', 'discord.com',
-                'twitch.tv', 'medium.com', 'github.com', 'gitlab.com'
+                'twitch.tv', 'medium.com', 'github.com', 'gitlab.com',
+                
+                # Motores de búsqueda y servicios de Google
+                'google.com', 'google.co.uk', 'google.es', 'google.fr', 'google.de',
+                'google.it', 'google.jp', 'google.cn', 'google.ru', 'google.com.br',
+                'google.com.mx', 'google.ca', 'google.com.au', 'google.co.in',
+                'gmail.com', 'youtube.com', 'googlemaps.com', 'googleanalytics.com',
+                'googleapis.com', 'googleusercontent.com', 'gstatic.com',
+                
+                # Otros motores de búsqueda
+                'bing.com', 'yahoo.com', 'duckduckgo.com', 'baidu.com', 'yandex.ru',
+                'ask.com', 'aol.com', 'search.naver.com', 'search.daum.net',
+                
+                # Bots y rastreadores comunes
+                'bot', 'crawler', 'spider', 'slurp', 'baiduspider', 'yandexbot',
+                'bingbot', 'googlebot', 'sogou', 'duckduckbot', 'baiduspider',
+                'yisouspider', 'sosospider', '360spider', 'sogou', 'soso',
+                'ahrefsbot', 'mj12bot', 'semrushbot', 'dotbot', 'applebot',
+                'rogerbot', 'lighthouse', 'pagespeed', 'gtmetrix', 'pingdom',
+                'uptimerobot', 'monitor', 'crawler', 'spider', 'bot', 'slurp',
+                'baiduspider', 'yandexbot', 'bingbot', 'googlebot', 'sogou',
+                'duckduckbot', 'baiduspider', 'yisouspider', 'sosospider',
+                '360spider', 'sogou', 'soso', 'ahrefsbot', 'mj12bot', 'semrushbot',
+                'dotbot', 'applebot', 'rogerbot', 'lighthouse', 'pagespeed',
+                'gtmetrix', 'pingdom', 'uptimerobot', 'monitor'
             ]
             
             # Parsear la URL a verificar
             parsed_url = urlparse(url)
             url_domain = parsed_url.netloc.lower()
             
-            # Verificar si es una red social
-            if any(social in url_domain for social in social_networks):
-                self.console.print_debug(f"URL de red social excluida: {url}")
+            # Verificar si el dominio está en la lista de exclusión (solo si no está forzado)
+            if not self.force and any(excluded in url_domain for excluded in excluded_domains):
+                self.console.print_debug(f"URL de dominio excluido: {url}")
                 return False
             
             # Verificar si el dominio coincide con el target

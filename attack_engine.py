@@ -515,15 +515,89 @@ class AttackEngine:
                     return True, f"Detected Error Signature: '{err}'"
         return False, "No Clear Indicator Found"
 
-    async def _verify_oob(self, response: httpx.Response, duration, sleep_time, payload, test_val) -> Tuple[bool, str]:
-        """Placeholder for OOB verification using Interactsh."""
-        if not self.interactsh_url: return False, "Interactsh URL not configured"
-        # Implementation requires an Interactsh client or polling logic.
-        self.console.print_debug("OOB verification needs Interactsh client/polling implementation.")
-        # Simulate a short wait, assuming interaction would happen quickly
-        await asyncio.sleep(2)
-        # In real implementation: Check interactsh for a hit related to payload/test_val
-        return False, "OOB Check Not Implemented"
+    async def _verify_oob(self, interactsh_url: str, payload_type: str) -> Tuple[bool, str]:
+        """Verifica si hay interacciones OOB con el servidor Interactsh."""
+        try:
+            # Esperar un tiempo para que lleguen las interacciones
+            await asyncio.sleep(2)
+            
+            # Hacer una petición GET al servidor Interactsh
+            response = await self._make_request(f"http://{interactsh_url}/poll")
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Verificar si hay interacciones
+                if data.get("data"):
+                    for interaction in data["data"]:
+                        if interaction.get("type") == payload_type:
+                            self.console.print_success(f"¡Interacción OOB detectada! Tipo: {payload_type}")
+                            return True, f"Interacción OOB detectada: {interaction}"
+                
+                self.console.print_debug("No se detectaron interacciones OOB")
+                return False, "No se detectaron interacciones OOB"
+            else:
+                self.console.print_error(f"Error al verificar interacciones OOB: {response.status_code}")
+                return False, f"Error al verificar interacciones OOB: {response.status_code}"
+                
+        except Exception as e:
+            self.console.print_error(f"Error al verificar interacciones OOB: {e}")
+            return False, f"Error al verificar interacciones OOB: {e}"
+
+    async def test_oob_vulnerabilities(self, url: str, interactsh_url: str) -> List[Dict]:
+        """Prueba vulnerabilidades OOB usando payloads específicos."""
+        findings = []
+        
+        try:
+            # Obtener los payloads OOB
+            oob_payloads = OOB_PAYLOADS
+            
+            for payload_type, payloads in oob_payloads.items():
+                self.console.print_info(f"Probando payloads OOB de tipo: {payload_type}")
+                
+                for payload in payloads:
+                    # Reemplazar el placeholder de Interactsh
+                    payload = payload.replace("INTERACTSH_URL", interactsh_url)
+                    
+                    # Enviar el payload
+                    response = await self._make_request(url, data={"input": payload})
+                    
+                    # Verificar si hay interacciones
+                    success, message = await self._verify_oob(interactsh_url, payload_type)
+                    
+                    if success:
+                        finding = {
+                            "type": "OOB",
+                            "payload_type": payload_type,
+                            "payload": payload,
+                            "url": url,
+                            "status_code": response.status_code,
+                            "message": message
+                        }
+                        findings.append(finding)
+                        await self.record_finding(finding)
+                        
+        except Exception as e:
+            self.console.print_error(f"Error al probar vulnerabilidades OOB: {e}")
+            
+        return findings
+
+    async def test_vulnerabilities(self, url: str, interactsh_url: str = None) -> List[Dict]:
+        """Prueba todas las vulnerabilidades conocidas."""
+        findings = []
+        
+        try:
+            # Probar vulnerabilidades OOB si se proporciona una URL de Interactsh
+            if interactsh_url:
+                oob_findings = await self.test_oob_vulnerabilities(url, interactsh_url)
+                findings.extend(oob_findings)
+            
+            # Probar otras vulnerabilidades...
+            
+        except Exception as e:
+            self.console.print_error(f"Error al probar vulnerabilidades: {e}")
+            
+        return findings
 
     def get_findings(self) -> List[Dict[str, Any]]:
         """Returns the list of findings collected by the engine."""
