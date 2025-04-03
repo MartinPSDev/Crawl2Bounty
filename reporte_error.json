@@ -1,10 +1,10 @@
 {
   "metadata": {
-    "scan_start": "2025-04-02T21:04:05.734432",
-    "scan_start_time": 1743638645.7345135,
-    "scan_end": "2025-04-02T21:04:33.373559",
-    "scan_end_time": 1743638673.3735569,
-    "scan_duration_seconds": 27.64,
+    "scan_start": "2025-04-02T21:09:12.651284",
+    "scan_start_time": 1743638952.6513014,
+    "scan_end": "2025-04-02T21:09:46.693233",
+    "scan_end_time": 1743638986.6932302,
+    "scan_duration_seconds": 34.04,
     "total_urls": 0,
     "total_findings": 0,
     "vulnerability_types": "set()",
@@ -25,7 +25,7 @@
       "captcha_detected": 1
     },
     "vulnerable_endpoints": [
-      "https://mercadopago.com.ar"
+      "https://unahur.edu.ar"
     ]
   },
   "findings": {
@@ -33,7 +33,7 @@
       {
         "type": "captcha_detected",
         "severity": "INFO",
-        "url": "https://mercadopago.com.ar",
+        "url": "https://unahur.edu.ar",
         "details": "Se detectó un CAPTCHA en la página"
       }
     ]

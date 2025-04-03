@@ -723,64 +723,657 @@ class SmartCrawler:
         except Exception as e:
             self.console.print_error(f"Error guardando respuesta: {e}")
 
-    async def _detect_captcha(self, page_content: str) -> bool:
-        """Detecta si hay un CAPTCHA en la página."""
-        captcha_indicators = [
-            "captcha", "recaptcha", "hcaptcha", "cloudflare", "security check",
-            "verification", "robot check", "human verification",
-            "g-recaptcha", "data-sitekey", "cf-turnstile"
-        ]
+    async def _detect_captcha(self, page_content: str) -> dict:
+        """Detects if there is a CAPTCHA on the page and returns information about its type."""
+        captcha_info = {
+            "detected": False,
+            "type": None,
+            "version": None,
+            "details": {}
+        }
         
-        return any(indicator in page_content.lower() for indicator in captcha_indicators)
+        # More specific detection patterns
+        captcha_patterns = {
+            "recaptcha": {
+                "patterns": [
+                    r'class="[^"]*g-recaptcha[^"]*"',
+                    r'src="[^"]*recaptcha/api\.js',
+                    r'data-sitekey="[^"]*"',
+                    r'grecaptcha\.render'
+                ],
+                "versions": {
+                    "v2": [r'data-size="(?:normal|compact)"', r'g-recaptcha-response'],
+                    "v3": [r'grecaptcha\.execute', r'action=', r'"recaptcha_score"'],
+                    "invisible": [r'data-size="invisible"']
+                }
+            },
+            "hcaptcha": {
+                "patterns": [
+                    r'class="[^"]*h-captcha[^"]*"',
+                    r'src="[^"]*hcaptcha\.com/1/api\.js',
+                    r'data-sitekey="[^"]*"',
+                    r'hcaptcha\.render'
+                ]
+            },
+            "cloudflare": {
+                "patterns": [
+                    r'cf-captcha-container',
+                    r'cf_captcha_kind',
+                    r'cloudflare-challenge',
+                    r'turnstile-callback',
+                    r'cf-turnstile',
+                    r'__cf_chl_captcha'
+                ]
+            },
+            "custom": {
+                "patterns": [
+                    r'captcha[\s_-]*image',
+                    r'captcha[\s_-]*input',
+                    r'verification[\s_-]*code',
+                    r'security[\s_-]*check',
+                    r'human[\s_-]*verification'
+                ]
+            }
+        }
+        
+        # Detect CAPTCHA type
+        for captcha_type, type_info in captcha_patterns.items():
+            for pattern in type_info["patterns"]:
+                if re.search(pattern, page_content, re.IGNORECASE):
+                    captcha_info["detected"] = True
+                    captcha_info["type"] = captcha_type
+                    
+                    # Detect specific version if available
+                    if "versions" in type_info:
+                        for version, version_patterns in type_info["versions"].items():
+                            for ver_pattern in version_patterns:
+                                if re.search(ver_pattern, page_content, re.IGNORECASE):
+                                    captcha_info["version"] = version
+                                    break
+                            if captcha_info["version"]:
+                                break
+                    
+                    # Extract sitekey for reCAPTCHA or hCaptcha
+                    if captcha_type in ["recaptcha", "hcaptcha"]:
+                        sitekey_match = re.search(r'data-sitekey="([^"]*)"', page_content)
+                        if sitekey_match:
+                            captcha_info["details"]["sitekey"] = sitekey_match.group(1)
+                    
+                    break
+            if captcha_info["detected"]:
+                break
+        
+        # Log result
+        if captcha_info["detected"]:
+            self.console.print_warning(f"CAPTCHA detected: {captcha_info['type']} {captcha_info['version'] or ''}")
+        
+        return captcha_info
 
     async def _handle_captcha(self, url: str) -> bool:
-        """Intenta manejar el CAPTCHA de diferentes maneras."""
+        """Attempts to handle CAPTCHA using multiple strategies."""
         try:
-            # 1. Intentar con diferentes User-Agents
-            user_agents = [
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
-                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Safari/605.1.15'
-            ]
-            
-            for user_agent in user_agents:
-                await self.context.set_extra_http_headers({
-                    'User-Agent': user_agent
-                })
-                await self.page.goto(url, wait_until="domcontentloaded")
-                page_content = await self.page.content()
-                if not await self._detect_captcha(page_content):
-                    return True
-                await asyncio.sleep(2)
-            
-            # 2. Intentar con diferentes IPs (usando proxy)
-            proxies = [
-                None,  # Sin proxy primero
-                'http://proxy1.example.com:8080',
-                'http://proxy2.example.com:8080'
-            ]
-            
-            for proxy in proxies:
-                if proxy:
-                    await self.context.set_extra_http_headers({
-                        'X-Forwarded-For': f'192.168.{random.randint(1,255)}.{random.randint(1,255)}'
-                    })
-                await self.page.goto(url, wait_until="domcontentloaded")
-                page_content = await self.page.content()
-                if not await self._detect_captcha(page_content):
-                    return True
-                await asyncio.sleep(2)
-            
-            # 3. Intentar con diferentes configuraciones de navegador
-            await self.context.clear_cookies()
-            await self.page.goto(url, wait_until="domcontentloaded")
+            # Get current content for analysis
             page_content = await self.page.content()
-            if not await self._detect_captcha(page_content):
+            captcha_info = await self._detect_captcha(page_content)
+            
+            if not captcha_info["detected"]:
+                return True  # No CAPTCHA to handle
+            
+            self.console.print_info(f"Attempting to handle CAPTCHA on {url}")
+            
+            # Strategy 1: CAPTCHA evasion techniques
+            if await self._try_captcha_evasion(url, captcha_info):
                 return True
+            
+            # Strategy 2: Simulate human behavior
+            if await self._try_human_simulation(url, captcha_info):
+                return True
+            
+            # Strategy 3: Use CAPTCHA solving services
+            if await self._try_captcha_service(url, captcha_info):
+                return True
+            
+            # Strategy 4: Retry with proxies and new sessions
+            if await self._try_session_rotation(url, captcha_info):
+                return True
+            
+            # Strategy 5: Look for alternative paths
+            if await self._try_alternative_paths(url):
+                return True
+            
+            # If all strategies failed, report the failure
+            self.console.print_error(f"Could not bypass CAPTCHA on {url}")
+            
+            if self.report_generator:
+                self.report_generator.add_findings("access_control", [{
+                    "type": "captcha_blocking",
+                    "severity": "MEDIUM",
+                    "url": url,
+                    "details": f"CAPTCHA detected ({captcha_info['type']} {captcha_info['version'] or ''}) that could not be bypassed automatically"
+                }])
             
             return False
             
         except Exception as e:
-            self.console.print_error(f"Error manejando CAPTCHA: {e}")
+            self.console.print_error(f"Error handling CAPTCHA: {str(e)}")
             return False
+
+    async def _try_captcha_evasion(self, url: str, captcha_info: dict) -> bool:
+        """Attempts evasion techniques for different CAPTCHA types."""
+        try:
+            # Set of headers that may help evade detection
+            evasion_headers = {
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cache-Control": "max-age=0",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-User": "?1",
+                "Upgrade-Insecure-Requests": "1",
+                "Referer": self.base_url
+            }
+            
+            # 1. Set headers and cookies to appear as a real browser
+            await self.context.clear_cookies()
+            await self.context.add_cookies([{
+                "name": "cf_clearance",  # Cookie often used by CloudFlare
+                "value": "".join(random.choices(string.ascii_letters + string.digits, k=32)),
+                "domain": urlparse(url).netloc,
+                "path": "/"
+            }])
+            await self.context.set_extra_http_headers(evasion_headers)
+            
+            # 2. Set browser properties to evade detection
+            await self.page.add_init_script("""
+                // Hide Playwright/Automation detection
+                Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                
+                // Hide features that reveal automation
+                if (window.navigator.permissions) {
+                    window.navigator.permissions.query = (function (originalQuery) {
+                        return function (permissionDesc) {
+                            if (permissionDesc.name === 'notifications') {
+                                return Promise.resolve({ state: "prompt", onchange: null });
+                            }
+                            return originalQuery.apply(this, arguments);
+                        };
+                    })(window.navigator.permissions.query);
+                }
+                
+                // Create random canvas fingerprint
+                const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+                HTMLCanvasElement.prototype.toDataURL = function(type) {
+                    if (this.width === 16 && this.height === 16) {
+                        return originalToDataURL.apply(this, arguments);
+                    }
+                    return originalToDataURL.apply(this, arguments);
+                };
+                
+                // Fake plugins
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => {
+                        const plugins = [];
+                        for (let i = 0; i < 5; i++) {
+                            plugins.push({
+                                name: `Plugin ${i}`,
+                                description: `Plugin Description ${i}`,
+                                filename: `plugin${i}.dll`,
+                                length: 1,
+                                item: function() { return this; }
+                            });
+                        }
+                        return plugins;
+                    }
+                });
+            """)
+            
+            # 3. Navigate to page with more human-like patterns
+            if urlparse(self.page.url).netloc == urlparse(url).netloc:
+                # Perform some human-like actions if already on the same domain
+                await self._simulate_human_behavior()
+            
+            # Random scrolling on the page
+            await self.page.evaluate("""
+                () => {
+                    const scrollMax = Math.max(
+                        document.body.scrollHeight,
+                        document.documentElement.scrollHeight
+                    );
+                    const randomScrolls = Math.floor(Math.random() * 5) + 2;
+                    
+                    for (let i = 0; i < randomScrolls; i++) {
+                        const targetScroll = Math.floor(Math.random() * scrollMax);
+                        window.scrollTo(0, targetScroll);
+                    }
+                }
+            """)
+            
+            # Wait random time like a human
+            await asyncio.sleep(random.uniform(2, 4))
+            
+            # 4. Navigate to URL again with new settings
+            navigation_options = {
+                "wait_until": "domcontentloaded",
+                "timeout": self.timeout,
+                "referer": self.base_url
+            }
+            await self.page.goto(url, **navigation_options)
+            await asyncio.sleep(random.uniform(1, 3))
+            
+            # 5. Check if we evaded the CAPTCHA
+            page_content = await self.page.content()
+            new_captcha_info = await self._detect_captcha(page_content)
+            
+            if not new_captcha_info["detected"]:
+                self.console.print_success(f"CAPTCHA successfully evaded using evasion techniques")
+                return True
+            
+            # 6. Try specific techniques based on CAPTCHA type
+            captcha_type = captcha_info["type"]
+            if captcha_type == "cloudflare":
+                # For CloudFlare, sometimes waiting is enough
+                self.console.print_info("CloudFlare detected, waiting for timeout...")
+                await asyncio.sleep(random.uniform(5, 8))
+                await self.page.reload()
+                page_content = await self.page.content()
+                if not await self._detect_captcha(page_content)["detected"]:
+                    self.console.print_success("CloudFlare CAPTCHA bypassed by timeout")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            self.console.print_warning(f"Error in CAPTCHA evasion: {str(e)}")
+            return False
+
+    async def _try_human_simulation(self, url: str, captcha_info: dict) -> bool:
+        """Attempts to simulate human behavior to bypass CAPTCHA."""
+        try:
+            # If it's a simple image CAPTCHA, we can try to solve it with automatic vision
+            if captcha_info["type"] == "custom":
+                # Look for CAPTCHA images
+                captcha_img = await self.page.query_selector('img[src*="captcha"], img[alt*="captcha" i]')
+                if captcha_img:
+                    self.console.print_info("Attempting to solve simple image CAPTCHA...")
+                    
+                    # Download the image
+                    img_src = await captcha_img.get_attribute('src')
+                    img_url = urljoin(self.page.url, img_src)
+                    
+                    # Here we could integrate an OCR or AI service to solve the CAPTCHA
+                    # For simplicity, this is a placeholder
+                    captcha_text = "ABC123"  # You should replace this with real OCR
+                    
+                    # Look for the CAPTCHA input
+                    captcha_input = await self.page.query_selector('input[name*="captcha" i], input[id*="captcha" i], input[placeholder*="captcha" i], input[placeholder*="code" i]')
+                    if captcha_input:
+                        await captcha_input.fill(captcha_text)
+                        await asyncio.sleep(random.uniform(0.5, 1.2))
+                        
+                        # Look for the submit button
+                        submit_button = await self.page.query_selector('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Verify")')
+                        if submit_button:
+                            await submit_button.click()
+                            await self.page.wait_for_load_state("domcontentloaded")
+                            
+                            # Check if it was solved
+                            page_content = await self.page.content()
+                            if not await self._detect_captcha(page_content)["detected"]:
+                                self.console.print_success("Image CAPTCHA successfully solved")
+                                return True
+            
+            # For reCAPTCHA, try to simulate click and drag
+            elif captcha_info["type"] == "recaptcha":
+                captcha_frame = await self.page.query_selector('iframe[src*="recaptcha"]')
+                if captcha_frame:
+                    self.console.print_info("reCAPTCHA detected, attempting human simulation...")
+                    
+                    # Switch to reCAPTCHA frame
+                    frame = await captcha_frame.content_frame()
+                    if frame:
+                        # Click the checkbox
+                        checkbox = await frame.query_selector('.recaptcha-checkbox-border')
+                        if checkbox:
+                            # Simulate mouse movement
+                            box = await checkbox.bounding_box()
+                            if box:
+                                # Realistic mouse movement
+                                start_x, start_y = random.randint(50, 500), random.randint(50, 500)
+                                steps = random.randint(10, 20)
+                                
+                                for i in range(steps):
+                                    progress = i / steps
+                                    x = start_x + (box['x'] + box['width']/2 - start_x) * progress
+                                    y = start_y + (box['y'] + box['height']/2 - start_y) * progress
+                                    await self.page.mouse.move(x, y)
+                                    await asyncio.sleep(random.uniform(0.01, 0.05))
+                                
+                                # Click the checkbox
+                                await checkbox.click({
+                                    'delay': random.randint(30, 150)
+                                })
+                                
+                                # Wait to see if CAPTCHA is automatically solved
+                                await asyncio.sleep(3)
+                                
+                                # Return to main frame
+                                await self.page.frame_locator('iframe[src*="recaptcha"]').locator('.recaptcha-checkbox-checkmark').click()
+                                
+                                # Wait for page update
+                                await asyncio.sleep(2)
+                                
+                                # Check if it was solved
+                                page_content = await self.page.content()
+                                if not await self._detect_captcha(page_content)["detected"]:
+                                    self.console.print_success("reCAPTCHA solved through simulation")
+                                    return True
+            
+            return False
+            
+        except Exception as e:
+            self.console.print_warning(f"Error in human simulation for CAPTCHA: {str(e)}")
+            return False
+
+    async def _try_captcha_service(self, url: str, captcha_info: dict) -> bool:
+        """Attempts to use external services to solve CAPTCHAs."""
+        try:
+            # Check if we have integration with any solving service
+            if not hasattr(self, 'captcha_service') or not self.captcha_service:
+                self.console.print_warning("No CAPTCHA solving service configured")
+                return False
+            
+            captcha_type = captcha_info["type"]
+            
+            # Placeholder for integration with services like 2captcha, Anti-Captcha, etc.
+            # In a real implementation, you would connect with the service's API
+            
+            self.console.print_info(f"Connecting with solving service for {captcha_type}...")
+            
+            if captcha_type == "recaptcha":
+                if "sitekey" in captcha_info["details"]:
+                    sitekey = captcha_info["details"]["sitekey"]
+                    # Placeholder - In real implementation:
+                    # result = await self.captcha_service.solve_recaptcha(url, sitekey)
+                    result = "03AGdBq24PBgMT-..."  # Example token
+                    
+                    # Insert token into page
+                    await self.page.evaluate(f"""
+                        document.getElementById('g-recaptcha-response').innerHTML = '{result}';
+                        if (typeof ___grecaptcha_cfg !== 'undefined') {{
+                            Object.keys(___grecaptcha_cfg.clients).forEach(function(key) {{
+                                const client = ___grecaptcha_cfg.clients[key];
+                                Object.keys(client).forEach(function(key) {{
+                                    if (typeof client[key].callback === 'function') {{
+                                        client[key].callback('{result}');
+                                    }}
+                                }});
+                            }});
+                        }}
+                    """)
+                    
+                    # Look for and click submit button
+                    submit_button = await self.page.query_selector('button[type="submit"], input[type="submit"], button:has-text("Submit"), button:has-text("Verify")')
+                    if submit_button:
+                        await submit_button.click()
+                        await self.page.wait_for_load_state("domcontentloaded")
+                    
+                    # Check if solved
+                    await asyncio.sleep(2)
+                    page_content = await self.page.content()
+                    if not await self._detect_captcha(page_content)["detected"]:
+                        self.console.print_success("reCAPTCHA solved through external service")
+                        return True
+            
+            elif captcha_type == "hcaptcha":
+                if "sitekey" in captcha_info["details"]:
+                    sitekey = captcha_info["details"]["sitekey"]
+                    # Placeholder for real integration
+                    # result = await self.captcha_service.solve_hcaptcha(url, sitekey)
+                    result = "P0_eyJ0eXAiO..."  # Example token
+                    
+                    # Insert token
+                    await self.page.evaluate(f"""
+                        document.querySelector('[name="h-captcha-response"]').value = '{result}';
+                        if (typeof hcaptcha !== 'undefined') {{
+                            hcaptcha.execute();
+                        }}
+                    """)
+                    
+                    # Look for and click submit button
+                    submit_button = await self.page.query_selector('button[type="submit"], input[type="submit"]')
+                    if submit_button:
+                        await submit_button.click()
+                        await self.page.wait_for_load_state("domcontentloaded")
+                    
+                    # Check
+                    await asyncio.sleep(2)
+                    page_content = await self.page.content()
+                    if not await self._detect_captcha(page_content)["detected"]:
+                        self.console.print_success("hCaptcha solved through external service")
+                        return True
+            
+            return False
+            
+        except Exception as e:
+            self.console.print_warning(f"Error in CAPTCHA solving service: {str(e)}")
+            return False
+
+    async def _try_session_rotation(self, url: str, captcha_info: dict) -> bool:
+        """Attempts to rotate sessions, IPs and configurations to evade CAPTCHA."""
+        try:
+            self.console.print_info("Attempting session/IP rotation to evade CAPTCHA...")
+            
+            # List of more realistic user agents
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/117.0',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
+            ]
+            
+            # Proxies (you should replace these with your own real proxies)
+            proxies = [
+                None,  # No proxy first
+                'http://user:pass@proxy1.example.com:8080',
+                'http://user:pass@proxy2.example.com:8080',
+                'socks5://user:pass@proxy3.example.com:1080'
+            ]
+            
+            # Browser configurations
+            browser_configs = [
+                {"viewport": {"width": 1920, "height": 1080}, "locale": "en-US", "timezone": "America/New_York"},
+                {"viewport": {"width": 1366, "height": 768}, "locale": "en-GB", "timezone": "Europe/London"},
+                {"viewport": {"width": 1536, "height": 864}, "locale": "es-ES", "timezone": "Europe/Madrid"},
+                {"viewport": {"width": 1440, "height": 900}, "locale": "fr-FR", "timezone": "Europe/Paris"}
+            ]
+            
+            # Try different combinations
+            for user_agent in user_agents:
+                for proxy in proxies:
+                    for config in browser_configs:
+                        self.console.print_debug(f"Trying UA: {user_agent[:20]}... Proxy: {'Yes' if proxy else 'No'}")
+                        
+                        # Close previous context and create new one
+                        if self.context:
+                            await self.context.close()
+                        
+                        # Configure context with new parameters
+                        browser_args = [
+                            '--disable-blink-features=AutomationControlled',
+                            '--disable-features=IsolateOrigins,site-per-process',
+                            '--disable-site-isolation-trials'
+                        ]
+                        
+                        if proxy:
+                            browser_args.append(f'--proxy-server={proxy}')
+                        
+                        self.context = await self.browser.new_context(
+                            viewport=config["viewport"],
+                            user_agent=user_agent,
+                            locale=config["locale"],
+                            timezone_id=config["timezone"],
+                            geolocation={"latitude": random.uniform(-90, 90), "longitude": random.uniform(-180, 180)},
+                            permissions=['geolocation']
+                        )
+                        
+                        # Configure detection evasion
+                        await self.context.add_init_script("""
+                            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                            Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+                        """)
+                        
+                        # Create new page
+                        self.page = await self.context.new_page()
+                        
+                        # Navigate with new parameters
+                        try:
+                            await self.page.goto(url, wait_until="domcontentloaded", timeout=self.timeout)
+                            await asyncio.sleep(random.uniform(2, 4))
+                            
+                            # Check if we evaded the CAPTCHA
+                            page_content = await self.page.content()
+                            if not await self._detect_captcha(page_content)["detected"]:
+                                self.console.print_success(f"CAPTCHA evaded with session/IP rotation")
+                                return True
+                        except Exception as e:
+                            self.console.print_warning(f"Error in attempt with configuration: {str(e)}")
+                            continue
+            
+            return False
+            
+        except Exception as e:
+            self.console.print_warning(f"Error in session rotation: {str(e)}")
+            return False
+
+    async def _try_alternative_paths(self, url: str) -> bool:
+        """Attempts to find alternative paths to access content."""
+        try:
+            self.console.print_info("Looking for alternative paths to avoid CAPTCHA...")
+            
+            parsed_url = urlparse(url)
+            base_domain = parsed_url.netloc
+            path = parsed_url.path
+            
+            # Create alternative URLs
+            alternative_urls = []
+            
+            # 1. Try alternative subdomains
+            if base_domain.startswith('www.'):
+                # Remove www.
+                alt_domain = base_domain[4:]
+                alternative_urls.append(f"{parsed_url.scheme}://{alt_domain}{path}")
+            else:
+                # Add www.
+                alternative_urls.append(f"{parsed_url.scheme}://www.{base_domain}{path}")
+            
+            # 2. Try alternative protocols
+            if parsed_url.scheme == 'https':
+                alternative_urls.append(f"http://{base_domain}{path}")
+            else:
+                alternative_urls.append(f"https://{base_domain}{path}")
+            
+            # 3. Try API or alternative endpoints
+            api_paths = ['/api', '/graphql', '/rest', '/v1', '/v2']
+            for api_path in api_paths:
+                if path.startswith('/'):
+                    new_path = f"{api_path}{path}"
+                else:
+                    new_path = f"{api_path}/{path}"
+                alternative_urls.append(f"{parsed_url.scheme}://{base_domain}{new_path}")
+            
+            # 4. Try mobile apps or specific endpoints
+            mobile_indicators = ['m.', 'mobile.', 'app.']
+            for indicator in mobile_indicators:
+                if not base_domain.startswith(indicator):
+                    mobile_domain = f"{indicator}{base_domain.split('.')[-2]}.{base_domain.split('.')[-1]}"
+                    alternative_urls.append(f"{parsed_url.scheme}://{mobile_domain}{path}")
+            
+            # 5. Try alternative formats (JSON, XML, etc.)
+            formats = ['.json', '.xml', '.txt']
+            for fmt in formats:
+                if not path.endswith(fmt):
+                    alternative_urls.append(f"{parsed_url.scheme}://{base_domain}{path}{fmt}")
+            
+            # Try alternative URLs
+            for alt_url in alternative_urls:
+                self.console.print_debug(f"Trying alternative path: {alt_url}")
+                
+                try:
+                    # Navigate to alternative URL
+                    await self.page.goto(alt_url, wait_until="domcontentloaded", timeout=self.timeout // 2)
+                    await asyncio.sleep(1)
+                    
+                    # Check for CAPTCHA
+                    page_content = await self.page.content()
+                    if not await self._detect_captcha(page_content)["detected"]:
+                        # Check if content is useful (not a 404, etc.)
+                        if not await self._is_error_page(page_content):
+                            self.console.print_success(f"Successfully accessed through alternative path: {alt_url}")
+                            return True
+                except Exception as e:
+                    self.console.print_warning(f"Error accessing alternative path {alt_url}: {str(e)}")
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            self.console.print_warning(f"Error looking for alternative paths: {str(e)}")
+            return False
+
+    async def _is_error_page(self, page_content: str) -> bool:
+        """Detects if a page is an error (404, etc.)."""
+        error_indicators = [
+            "404", "not found", "page not found", "error", "does not exist",
+            "didn't find", "couldn't find", "no encontrado", "no existe"
+        ]
+        
+        # Check for error text in content
+        for indicator in error_indicators:
+            if indicator in page_content.lower():
+                return True
+        
+        return False
+
+    async def _simulate_human_behavior(self):
+        """Simulates human behavior on the page."""
+        try:
+            # 1. Random mouse movements
+            viewport = await self.page.evaluate("""
+                () => ({
+                    width: window.innerWidth,
+                    height: window.innerHeight
+                })
+            """)
+            
+            mouse_moves = random.randint(3, 8)
+            for _ in range(mouse_moves):
+                x = random.randint(10, viewport["width"] - 10)
+                y = random.randint(10, viewport["height"] - 10)
+                await self.page.mouse.move(x, y)
+                await asyncio.sleep(random.uniform(0.1, 0.3))
+            
+            # 2. Random scrolling
+            scroll_steps = random.randint(2, 5)
+            for _ in range(scroll_steps):
+                scroll_amount = random.randint(100, 500)
+                await self.page.mouse.wheel(0, scroll_amount)
+                await asyncio.sleep(random.uniform(0.2, 0.5))
+            
+            # 3. Random clicks on non-interactive elements
+            click_count = random.randint(1, 3)
+            for _ in range(click_count):
+                x = random.randint(10, viewport["width"] - 10)
+                y = random.randint(10, viewport["height"] - 10)
+                await self.page.mouse.click(x, y, delay=random.randint(100, 300))
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+            
+            # 4. Random keyboard input
+            if random.random() < 0.3:  # 30% chance
+                await self.page.keyboard.type(" ".join(random.choices(string.ascii_lowercase, k=random.randint(5, 10))))
+                await asyncio.sleep(random.uniform(0.5, 1.0))
+            
+        except Exception as e:
+            self.console.print_warning(f"Error simulating human behavior: {str(e)}")
