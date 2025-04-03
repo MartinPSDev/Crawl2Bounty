@@ -229,69 +229,94 @@ class SmartCrawler:
             
             # Static JS analysis
             self.console.print_debug("Performing static JS analysis...")
-            js_findings = await self.detector.analyze_js(page_content)
-            
-            if self.report_generator and js_findings:
-                self.report_generator.add_findings("javascript_analysis", js_findings)
-                self.console.print_debug(f"JS findings added to report: {len(js_findings)}")
+            try:
+                js_findings = await self.detector.analyze_js(page_content)
+                if self.report_generator and js_findings:
+                    self.report_generator.add_findings("javascript_analysis", js_findings)
+                    self.console.print_debug(f"JS findings added to report: {len(js_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error en análisis JS: {e}")
             
             # Basic vulnerability checks
             self.console.print_debug("Performing basic vulnerability checks...")
-            parsed_url = urlparse(url)
-            params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
-            if params:
-                vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params)
-                if self.report_generator and vuln_findings:
-                    self.report_generator.add_findings("vulnerability_scan", vuln_findings)
-                    self.console.print_debug(f"Vulnerability findings added to report: {len(vuln_findings)}")
+            try:
+                parsed_url = urlparse(url)
+                params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
+                if params:
+                    vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params)
+                    if self.report_generator and vuln_findings:
+                        self.report_generator.add_findings("vulnerability_scan", vuln_findings)
+                        self.console.print_debug(f"Vulnerability findings added to report: {len(vuln_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error en verificación de vulnerabilidades: {e}")
             
             # Dynamic analysis
             self.console.print_debug("Performing dynamic analysis...")
-            dynamic_findings = await self.detector.analyze_dynamic_content(self.page)
-            if self.report_generator and dynamic_findings:
-                self.report_generator.add_findings("dynamic_analysis", dynamic_findings)
-                self.console.print_debug(f"Dynamic findings added to report: {len(dynamic_findings)}")
+            try:
+                if self.page:
+                    dynamic_findings = await self.detector.analyze_dynamic_content(self.page)
+                    if self.report_generator and dynamic_findings:
+                        self.report_generator.add_findings("dynamic_analysis", dynamic_findings)
+                        self.console.print_debug(f"Dynamic findings added to report: {len(dynamic_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error en análisis dinámico: {e}")
             
             # Handle interactive elements
             self.console.print_debug("Handling interactive elements...")
-            interactive_findings = await self.handle_interactive_elements(self.page, url, depth)
-            if self.report_generator and interactive_findings:
-                self.report_generator.add_findings("interactive_elements", interactive_findings)
-                self.console.print_debug(f"Interactive findings added to report: {len(interactive_findings)}")
+            try:
+                if self.page:
+                    interactive_findings = await self.handle_interactive_elements(self.page, url, depth)
+                    if self.report_generator and interactive_findings:
+                        self.report_generator.add_findings("interactive_elements", interactive_findings)
+                        self.console.print_debug(f"Interactive findings added to report: {len(interactive_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error manejando elementos interactivos: {e}")
             
             # Handle forms
             self.console.print_debug("Handling forms...")
-            forms = await self.page.query_selector_all('form')
-            for form in forms:
-                form_findings = await self.handle_form_submission(self.page, form, url, depth)
-                if self.report_generator and form_findings:
-                    self.report_generator.add_findings("form_analysis", form_findings)
-                    self.console.print_debug(f"Form findings added to report: {len(form_findings)}")
+            try:
+                if self.page:
+                    forms = await self.page.query_selector_all('form')
+                    for form in forms:
+                        form_findings = await self.handle_form_submission(self.page, form, url, depth)
+                        if self.report_generator and form_findings:
+                            self.report_generator.add_findings("form_analysis", form_findings)
+                            self.console.print_debug(f"Form findings added to report: {len(form_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error manejando formularios: {e}")
             
             # Handle search forms
             self.console.print_debug("Handling search forms...")
-            search_findings = await self.handle_search_forms(self.page, url, depth)
-            if self.report_generator and search_findings:
-                self.report_generator.add_findings("search_analysis", search_findings)
-                self.console.print_debug(f"Search findings added to report: {len(search_findings)}")
+            try:
+                if self.page:
+                    search_findings = await self.handle_search_forms(self.page, url, depth)
+                    if self.report_generator and search_findings:
+                        self.report_generator.add_findings("search_analysis", search_findings)
+                        self.console.print_debug(f"Search findings added to report: {len(search_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error manejando formularios de búsqueda: {e}")
             
             # Gather new links
             self.console.print_debug("Gathering new links...")
-            links = await self.page.query_selector_all('a[href]')
-            new_urls = []
-            for link in links:
-                href = await link.get_attribute('href')
-                if href:
-                    full_url = urljoin(url, href)
-                    if self.is_in_scope(full_url):
-                        new_urls.append(full_url)
-                        await self.add_to_crawl_queue(full_url, depth + 1)
-            
-            if self.report_generator:
-                self.report_generator.log_realtime_event("LINKS_FOUND", f"Enlaces encontrados en {url}", {
-                    "total_links": len(new_urls),
-                    "new_urls": new_urls[:5]  # Limitamos a 5 URLs para el log
-                })
+            try:
+                if self.page:
+                    links = await self.page.query_selector_all('a[href]')
+                    new_urls = []
+                    for link in links:
+                        href = await link.get_attribute('href')
+                        if href:
+                            full_url = urljoin(url, href)
+                            if self.is_in_scope(full_url):
+                                new_urls.append(full_url)
+                                await self.add_to_crawl_queue(full_url, depth + 1)
+                    
+                    if self.report_generator:
+                        self.report_generator.log_realtime_event("LINKS_FOUND", f"Enlaces encontrados en {url}", {
+                            "total_links": len(new_urls),
+                            "new_urls": new_urls[:5]  # Limitamos a 5 URLs para el log
+                        })
+            except Exception as e:
+                self.console.print_error(f"Error recolectando enlaces: {e}")
             
             # Wait for rate limiting
             await asyncio.sleep(self.rate_limit_delay)

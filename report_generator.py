@@ -16,7 +16,10 @@ class ReportGenerator:
         self.findings = defaultdict(list)  # Inicializar como defaultdict para evitar KeyError
         self.metadata = {
             "scan_start": datetime.now().isoformat(),
+            "scan_start_time": time.time(),
             "scan_end": None,
+            "scan_end_time": None,
+            "scan_duration_seconds": None,
             "total_urls": 0,
             "total_findings": 0,
             "vulnerability_types": set(),
@@ -168,18 +171,21 @@ class ReportGenerator:
 
     def finalize_report(self):
         """Finaliza el reporte y registra la finalización en los logs."""
-        if self.metadata["scan_end_time"] is None:
-            end_time = time.time()
-            self.metadata["scan_end_time"] = end_time
-            self.metadata["scan_end_iso"] = datetime.now().isoformat()
-            if self.metadata["scan_start_time"]:
-                self.metadata["scan_duration_seconds"] = round(end_time - self.metadata["scan_start_time"], 2)
-            
-            # Registrar finalización en logs
-            self.log_realtime_event("SCAN_COMPLETE", "Escaneo finalizado", {
-                "duración_segundos": self.metadata["scan_duration_seconds"],
-                "total_hallazgos": sum(len(findings) for findings in self.findings.values())
-            })
+        try:
+            if self.metadata["scan_end_time"] is None:
+                end_time = time.time()
+                self.metadata["scan_end_time"] = end_time
+                self.metadata["scan_end"] = datetime.now().isoformat()
+                if self.metadata["scan_start_time"]:
+                    self.metadata["scan_duration_seconds"] = round(end_time - self.metadata["scan_start_time"], 2)
+                
+                # Registrar finalización en logs
+                self.log_realtime_event("SCAN_COMPLETE", "Escaneo finalizado", {
+                    "duración_segundos": self.metadata["scan_duration_seconds"],
+                    "total_hallazgos": sum(len(findings) for findings in self.findings.values())
+                })
+        except Exception as e:
+            self.console.print_error(f"Error finalizando reporte: {e}")
 
     def generate_summary(self) -> dict:
         """Generates a summary dictionary from all collected findings."""
