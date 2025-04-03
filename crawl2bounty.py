@@ -15,10 +15,149 @@ from typing import Optional
 from urllib.parse import urlparse
 from smart_detector import SmartDetector
 from attack_engine import AttackEngine
+import subprocess
+import requests
+from packaging import version
+import json
 
 # Constantes de configuración
 MAX_DEPTH = 10  # Profundidad máxima recomendada
 MIN_DEPTH = 1   # Profundidad mínima
+GITHUB_REPO = "tu-usuario/crawl2bounty"  # Reemplazar con el repositorio real
+
+def get_repo_info():
+    """Obtiene la información del repositorio desde el archivo de configuración."""
+    try:
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                return config['repository']
+    except Exception as e:
+        logging.error(f"Error leyendo configuración: {e}")
+    return None
+
+def get_git_info():
+    """Obtiene información del repositorio git si existe."""
+    try:
+        # Verificar si estamos en un repositorio git
+        if os.path.exists('.git'):
+            # Obtener URL remota
+            result = subprocess.run(['git', 'remote', '-v'], capture_output=True, text=True)
+            if result.returncode == 0:
+                for line in result.stdout.split('\n'):
+                    if 'origin' in line and '(fetch)' in line:
+                        url = line.split()[1]
+                        # Extraer owner y repo de la URL
+                        if 'github.com' in url:
+                            parts = url.replace('.git', '').split('/')
+                            owner = parts[-2]
+                            repo = parts[-1]
+                            return {
+                                'owner': owner,
+                                'name': repo,
+                                'is_git': True
+                            }
+    except Exception as e:
+        logging.error(f"Error obteniendo información git: {e}")
+    return None
+
+def check_for_updates():
+    """Verifica si hay actualizaciones disponibles en GitHub."""
+    try:
+        # Primero intentar obtener info de git
+        git_info = get_git_info()
+        if git_info and git_info['is_git']:
+            repo_owner = git_info['owner']
+            repo_name = git_info['name']
+        else:
+            # Si no es git, usar la configuración
+            repo_info = get_repo_info()
+            if not repo_info:
+                return False, None
+            repo_owner = repo_info['owner']
+            repo_name = repo_info['name']
+        
+        # Obtener la versión actual
+        current_version = get_current_version()
+        
+        # Obtener la última versión de GitHub
+        response = requests.get(f"https://api.github.com/repos/{repo_owner}/{repo_name}/releases/latest")
+        if response.status_code == 200:
+            latest_version = response.json()["tag_name"]
+            if version.parse(latest_version) > version.parse(current_version):
+                return True, latest_version
+    except Exception as e:
+        logging.error(f"Error checking for updates: {e}")
+    return False, None
+
+def get_current_version():
+    """Obtiene la versión actual de la herramienta."""
+    try:
+        # Primero intentar desde git
+        if os.path.exists('.git'):
+            result = subprocess.run(['git', 'describe', '--tags'], capture_output=True, text=True)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        
+        # Si no es git, usar la configuración
+        repo_info = get_repo_info()
+        if repo_info:
+            return repo_info['version']
+    except Exception as e:
+        logging.error(f"Error obteniendo versión actual: {e}")
+    return "1.0.0"  # Versión por defecto
+
+def update_tool():
+    """Actualiza el tool desde GitHub."""
+    try:
+        console = ConsoleManager(verbose=True)
+        console.print_info("Iniciando actualización...")
+        
+        # Obtener información del repositorio
+        git_info = get_git_info()
+        if git_info and git_info['is_git']:
+            # Si es un repositorio git, actualizar
+            console.print_info("Actualizando desde repositorio git...")
+            subprocess.run(["git", "pull"], check=True)
+        else:
+            # Si no es git, usar la configuración
+            repo_info = get_repo_info()
+            if not repo_info:
+                console.print_error("No se pudo determinar el repositorio para actualizar")
+                return False
+            
+            console.print_info(f"Clonando repositorio {repo_info['owner']}/{repo_info['name']}...")
+            subprocess.run([
+                "git", "clone", 
+                f"https://github.com/{repo_info['owner']}/{repo_info['name']}.git",
+                "temp_update"
+            ], check=True)
+            
+            # Copiar archivos actualizados
+            for file in os.listdir("temp_update"):
+                if file != ".git":
+                    src = os.path.join("temp_update", file)
+                    dst = os.path.join(".", file)
+                    if os.path.isdir(src):
+                        if os.path.exists(dst):
+                            subprocess.run(["rm", "-rf", dst])
+                        subprocess.run(["cp", "-r", src, "."])
+                    else:
+                        subprocess.run(["cp", src, dst])
+            
+            # Limpiar directorio temporal
+            subprocess.run(["rm", "-rf", "temp_update"])
+        
+        # Instalar dependencias actualizadas
+        console.print_info("Instalando dependencias actualizadas...")
+        subprocess.run(["pip", "install", "-r", "requirements.txt"], check=True)
+        
+        console.print_success("Actualización completada exitosamente!")
+        return True
+    except Exception as e:
+        console.print_error(f"Error durante la actualización: {e}")
+        return False
 
 def create_domain_directory(url: str) -> str:
     """Crea un directorio para el dominio y retorna su ruta."""
@@ -169,7 +308,7 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
 def main():
     """Main function to run the web vulnerability scanner."""
     parser = argparse.ArgumentParser(description='Web Vulnerability Scanner with Advanced Features')
-    parser.add_argument('url', help='Target URL to scan')
+    parser.add_argument('url', nargs='?', help='Target URL to scan')
     parser.add_argument('--depth', type=int, default=2, help='Maximum crawl depth (default: 2)')
     parser.add_argument('--timeout', type=int, default=30, help='Request timeout in seconds (default: 30)')
     parser.add_argument('--rate-limit', type=float, default=1.0, help='Delay between requests in seconds (default: 1.0)')
@@ -181,8 +320,28 @@ def main():
     parser.add_argument('--force', '-f', action='store_true', help='Forzar el análisis de dominios normalmente excluidos (redes sociales, etc.)')
     parser.add_argument('-o', '--output', help='Nombre del archivo de salida para el reporte')
     parser.add_argument('-v', '--verbose', action='store_true', help='Modo verbose para mostrar más información')
+    parser.add_argument('-u', '--update', action='store_true', help='Actualizar la herramienta desde GitHub')
     
     args = parser.parse_args()
+    
+    # Verificar si se solicitó actualización
+    if args.update:
+        if update_tool():
+            sys.exit(0)
+        else:
+            sys.exit(1)
+    
+    # Verificar si se proporcionó URL
+    if not args.url:
+        parser.print_help()
+        sys.exit(1)
+    
+    # Verificar actualizaciones disponibles
+    has_update, latest_version = check_for_updates()
+    if has_update:
+        console = ConsoleManager(verbose=True)
+        console.print_warning(f"Hay una nueva versión disponible: {latest_version}")
+        console.print_info("Ejecuta con el flag -u o --update para actualizar")
     
     # Crear directorio para el dominio
     domain_dir = create_domain_directory(args.url)

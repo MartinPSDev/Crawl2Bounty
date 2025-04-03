@@ -687,13 +687,13 @@ class SmartCrawler:
             if not self.page:
                 return
                 
-            # Crear nombre de archivo seguro
+            
             safe_filename = re.sub(r'[^a-zA-Z0-9]', '_', urlparse(url).path)
             if not safe_filename:
                 safe_filename = 'index'
             safe_filename = f"{safe_filename}.png"
             
-            # Guardar en el directorio del dominio
+            
             screenshot_path = os.path.join(self.domain_dir, 'screenshots', safe_filename)
             await self.page.screenshot(path=screenshot_path, full_page=True)
             self.console.print_debug(f"Captura de pantalla guardada: {screenshot_path}")
