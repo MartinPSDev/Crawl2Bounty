@@ -23,7 +23,7 @@ import json
 # Constantes de configuración
 MAX_DEPTH = 10  # Profundidad máxima recomendada
 MIN_DEPTH = 1   # Profundidad mínima
-GITHUB_REPO = "tu-usuario/crawl2bounty"  # Reemplazar con el repositorio real
+GITHUB_REPO = "M4rt1n_0x1337/crawl2Bounty"  
 
 def get_repo_info():
     """Obtiene la información del repositorio desde el archivo de configuración."""
