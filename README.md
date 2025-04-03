@@ -1,4 +1,5 @@
-# Crawl2Bounty
+<img src="/assets/banner.jpg" width="auto" height="5%" alt="banner image">
+
 **CRAWL2BOUNTY** is an advanced web application security assessment tool designed to identify vulnerabilities and insecure configurations through crawling, dynamic analysis, and automated testing techniques. Its purpose is to assist pentesters and hunters in detecting exploitable flaws in websites.
 
 ## Main Components
