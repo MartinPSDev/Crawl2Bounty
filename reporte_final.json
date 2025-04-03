@@ -25,7 +25,7 @@
       "captcha_detected": 1
     },
     "vulnerable_endpoints": [
-      "https://unahur.edu.ar"
+      ""
     ]
   },
   "findings": {
@@ -33,7 +33,7 @@
       {
         "type": "captcha_detected",
         "severity": "INFO",
-        "url": "https://unahur.edu.ar",
+        "url": ,
         "details": "Se detectó un CAPTCHA en la página"
       }
     ]
