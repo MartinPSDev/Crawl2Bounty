@@ -119,7 +119,24 @@ def update_tool():
         if git_info and git_info['is_git']:
             # Si es un repositorio git, actualizar
             console.print_info("Actualizando desde repositorio git...")
-            subprocess.run(["git", "pull"], check=True)
+            
+            # Verificar si la rama actual tiene seguimiento configurado
+            result = subprocess.run(['git', 'branch', '--show-current'], capture_output=True, text=True)
+            current_branch = result.stdout.strip()
+            
+            if current_branch:
+                # Intentar configurar el seguimiento si no existe
+                subprocess.run(['git', 'branch', '--set-upstream-to', f'origin/{current_branch}', current_branch], 
+                             capture_output=True)
+            
+            # Intentar hacer pull
+            pull_result = subprocess.run(['git', 'pull'], capture_output=True, text=True)
+            
+            if pull_result.returncode != 0:
+                console.print_warning("No se pudo actualizar automáticamente. Intentando método alternativo...")
+                # Si falla el pull, intentar fetch y reset
+                subprocess.run(['git', 'fetch', 'origin'], check=True)
+                subprocess.run(['git', 'reset', '--hard', 'origin/main'], check=True)
         else:
             # Si no es git, usar la configuración
             repo_info = get_repo_info()
