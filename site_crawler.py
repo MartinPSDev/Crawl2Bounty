@@ -128,12 +128,17 @@ class SmartCrawler:
         except Exception as e:
             self.console.print_error(f"Error during crawl: {e}")
         finally:
-            if self.page:
-                await self.page.close()
-            if self.context:
-                await self.context.close()
-            if self.browser:
-                await self.browser.close()
+            try:
+                if self.page:
+                    await self.page.close()
+                if self.context:
+                    await self.context.close()
+                if self.browser:
+                    await self.browser.close()
+                if playwright:
+                    await playwright.stop()
+            except Exception as e:
+                self.console.print_error(f"Error closing browser: {e}")
 
     async def _crawl(self, page: Page, url: str, depth: int):
         """Recursive function to crawl the website."""

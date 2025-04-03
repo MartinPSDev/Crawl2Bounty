@@ -1,0 +1,41 @@
+{
+  "metadata": {
+    "scan_start": "2025-04-02T21:04:05.734432",
+    "scan_start_time": 1743638645.7345135,
+    "scan_end": "2025-04-02T21:04:33.373559",
+    "scan_end_time": 1743638673.3735569,
+    "scan_duration_seconds": 27.64,
+    "total_urls": 0,
+    "total_findings": 0,
+    "vulnerability_types": "set()",
+    "severity_counts": {
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 0,
+      "info": 0
+    }
+  },
+  "summary": {
+    "total_findings": 1,
+    "by_severity": {
+      "info": 1
+    },
+    "by_type": {
+      "captcha_detected": 1
+    },
+    "vulnerable_endpoints": [
+      "https://mercadopago.com.ar"
+    ]
+  },
+  "findings": {
+    "access_control": [
+      {
+        "type": "captcha_detected",
+        "severity": "INFO",
+        "url": "https://mercadopago.com.ar",
+        "details": "Se detectó un CAPTCHA en la página"
+      }
+    ]
+  }
+}
