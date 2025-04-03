@@ -129,8 +129,8 @@ def update_tool():
                 subprocess.run(['git', 'branch', '--set-upstream-to', f'origin/{current_branch}', current_branch], 
                              capture_output=True)
             
-            # Intentar hacer pull
-            pull_result = subprocess.run(['git', 'pull'], capture_output=True, text=True)
+            # Intentar hacer pull sin autenticación
+            pull_result = subprocess.run(['git', 'pull', '--no-rebase'], capture_output=True, text=True)
             
             if pull_result.returncode != 0:
                 console.print_warning("No se pudo actualizar automáticamente. Intentando método alternativo...")
@@ -168,7 +168,35 @@ def update_tool():
         
         # Instalar dependencias actualizadas
         console.print_info("Instalando dependencias actualizadas...")
-        subprocess.run(["pip", "install", "-r", "requirements.txt"], check=True)
+        
+        # Verificar si estamos en Kali Linux
+        if os.path.exists('/etc/kali-release'):
+            console.print_info("Detectado Kali Linux. Instalando dependencias en el entorno virtual actual...")
+            
+            # Verificar si estamos en un entorno virtual usando múltiples métodos
+            is_venv = (
+                hasattr(sys, 'real_prefix') or  # virtualenv
+                (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix) or  # venv
+                'VIRTUAL_ENV' in os.environ  # variable de entorno
+            )
+            
+            if is_venv:
+                console.print_info("Entorno virtual detectado. Usando pip del entorno virtual...")
+                # Usar pip del entorno virtual actual
+                subprocess.run(['python3', '-m', 'pip', 'install', '--upgrade', 'pip'], check=True)
+                subprocess.run(['python3', '-m', 'pip', 'install', '-r', 'requirements.txt'], check=True)
+            else:
+                # No estamos en un entorno virtual, usar pipx
+                console.print_info("Usando pipx para instalar dependencias...")
+                try:
+                    subprocess.run(['pipx', 'install', '-r', 'requirements.txt'], check=True)
+                except subprocess.CalledProcessError:
+                    console.print_warning("pipx no está instalado. Instalando pipx...")
+                    subprocess.run(['apt', 'install', '-y', 'pipx'], check=True)
+                    subprocess.run(['pipx', 'install', '-r', 'requirements.txt'], check=True)
+        else:
+            # Para otros sistemas, usar pip normal
+            subprocess.run(['pip', 'install', '-r', 'requirements.txt'], check=True)
         
         console.print_success("Actualización completada exitosamente!")
         return True
