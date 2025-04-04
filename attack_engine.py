@@ -197,38 +197,49 @@ class AttackEngine:
         try: return urlparse(url)._replace(fragment="", query="").geturl().rstrip('/')
         except: return url.rstrip('/')
 
-    async def test_vulnerability(self, url: str, method: str = "GET", params: Optional[dict] = None, data: Optional[dict] = None):
-        """Main function to test multiple vulnerabilities on an endpoint/params."""
-        self.console.print_info(f"Starting vulnerability test on {method} {url}")
+    async def test_vulnerability(self, url: str, method: str = "GET", params=None, data=None, headers=None):
+        self.console.print_info(f"Testing vulnerabilities on {method} {url}")
+        findings = []
+        
         params = params or {}
         data = data or {}
-        target_fields = list(params.keys()) + list(data.keys())
-
-        self.console.print_info(f"Initiating vulnerability checks for: {method} {url}")
-
-        # If no params/data, check Path Traversal on path itself
-        if not target_fields and '?' not in url and not data:
-            self.console.print_debug(f"No params/data, checking Path Traversal on path for {url}")
-            await self.test_path_traversal(url, method, path_itself=True)
-            return # No field-based tests to run
-
-        # Test each parameter/data field
-        if target_fields:
-             self.console.print_debug(f"Testing fields: {', '.join(target_fields)} for {url}")
-
-        tasks = []
-        for field in target_fields:
-            if field: # Ensure field name is not empty
-                tasks.extend([
-                    self.test_sqli(url, method, params, data, field),
-                    self.test_xss(url, method, params, data, field),
-                    self.test_cmdi(url, method, params, data, field),
-                    self.test_ssti(url, method, params, data, field),
-                    self.test_path_traversal(url, method, params, data, field)
-                ])
-        # Run tests concurrently for all fields
-        if tasks:
-             await asyncio.gather(*tasks)
+        headers = headers or {}
+        
+        # Función auxiliar para probar payloads
+        async def test_payloads(payload_dict, vuln_type, verify_func):
+            for category, payloads in payload_dict.items():
+                if isinstance(payloads, dict):
+                    for subcat, sub_payloads in payloads.items():
+                        for payload in sub_payloads:
+                            self.console.print_debug(f"Testing {vuln_type}-{category}-{subcat}: {payload}")
+                            finding = await self._test_single_payload(url, method, payload, params, data, headers, verify_func)
+                            if finding:
+                                findings.append(finding)
+                else:
+                    for payload in payloads:
+                        self.console.print_debug(f"Testing {vuln_type}-{category}: {payload}")
+                        finding = await self._test_single_payload(url, method, payload, params, data, headers, verify_func)
+                        if finding:
+                            findings.append(finding)
+        
+        # Probar todas las categorías, incluso sin params/data
+        await test_payloads(SQLI_PAYLOADS, "SQLi", self._verify_sqli_error)
+        await test_payloads(XSS_PAYLOADS, "XSS", self._verify_xss_reflection)
+        await test_payloads(CMD_PAYLOADS, "CMDi", self._verify_cmdi_time)
+        await test_payloads(SSTI_PAYLOADS, "SSTI", self._verify_ssti_calc)
+        await test_payloads(PATH_TRAVERSAL_PAYLOADS, "PathTraversal", self._verify_path_traversal)
+        if self.interactsh_url:
+            await test_payloads(OOB_PAYLOADS, "OOB", self._verify_oob)
+        
+        # Añadir pruebas en cabeceras
+        header_findings = await self.test_headers(url, method)
+        findings.extend(header_findings)
+        
+        if findings:
+            self.console.print_success(f"Found {len(findings)} vulnerabilities on {url}")
+        else:
+            self.console.print_debug(f"No vulnerabilities found on {url}")
+        return findings
 
     async def test_sqli(self, url, method, base_params, base_data, field):
         vuln_type = "SQLi"; test_key = self._get_test_key(method, url, field, vuln_type)
@@ -484,7 +495,7 @@ class AttackEngine:
              response = await self._make_request(test_url, method, params=current_params, data=current_data, payload_info=payload_info)
 
              if response:
-                 is_vuln, details = self._verify_path_traversal(response, payload)
+                 is_vuln, details = self._verify_path_traversal(response)
                  self.console.print_attack_attempt(test_url, method, "PathTrav", payload, response.status_code, len(response.content), is_vuln, "File Content/Error")
                  if is_vuln:
                      self.record_finding("path_traversal", "HIGH", {
@@ -494,27 +505,17 @@ class AttackEngine:
                      }, url)
                      return
 
-    def _verify_path_traversal(self, response: httpx.Response, payload: str) -> Tuple[bool, str]:
-        if not response: return False, "No Response"
-        text = response.text
-        sensitive_content = {
-            "root:x:0:0": "/etc/passwd content", "shadow:": "/etc/shadow content",
-            "[boot loader]": "Windows boot.ini", "[fonts]": "Windows win.ini",
-            "<?php": "PHP source", "<%@": "JSP source", "import java": "Java source",
-            "def main": "Python source", "function(": "JavaScript source",
-            "<title>Index of /": "Directory Listing", "Microsoft Windows": "Windows info",
-            "Linux": "Linux info", "DOCUMENT_ROOT": "PHP Info/Environ",
-        }
-        for pattern, description in sensitive_content.items():
-            if (pattern in text or pattern.lower() in text.lower()) and payload.lower() not in text.lower()[:len(payload)+200]:
-                 return True, f"Found '{description}'"
-        errors = ["failed to open stream", "include(", "require(", "file_get_contents(", "no such file", "failed opening required", "system cannot find the file", "could not find file", "仮想パス", "open_basedir restriction", "File does not exist"]
-        if response.status_code != 404:
-            text_lower = text.lower()
-            for err in errors:
-                if err in text_lower and payload.lower() not in err:
-                    return True, f"Detected Error Signature: '{err}'"
-        return False, "No Clear Indicator Found"
+    async def _verify_path_traversal(self, response):
+        content = await response.text().lower()
+        sensitive_keywords = ["/etc/passwd", "root:", "/windows/", "win.ini"]
+        if response.status == 200 and any(keyword in content for keyword in sensitive_keywords):
+            self.console.print_debug("Path traversal confirmed: sensitive content found")
+            return True
+        if response.status >= 500 and "error" in content:
+            self.console.print_debug("Path traversal possible: server error")
+            return True
+        self.console.print_debug("Path traversal not confirmed")
+        return False
 
     async def _verify_oob(self, interactsh_url: str, payload_type: str) -> Tuple[bool, str]:
         """Verifica si hay interacciones OOB con el servidor Interactsh."""
@@ -609,5 +610,36 @@ class AttackEngine:
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.close_client()
+
+    async def _test_single_payload(self, url, method, payload, params, data, headers, verify_func):
+        # Inyectar payload en un parámetro genérico o existente
+        test_params = {**params, "test": payload} if not params else {k: payload if i == 0 else v for i, (k, v) in enumerate(params.items())}
+        test_data = {**data, "test": payload} if not data else {k: payload if i == 0 else v for i, (k, v) in enumerate(data.items())}
+        
+        try:
+            response = await self._make_request(url, method, params=test_params, data=test_data, headers=headers)
+            content = await response.text()
+            self.console.print_debug(f"Response status: {response.status}, length: {len(content)}")
+            
+            if verify_func(response):
+                return {
+                    "type": "vulnerability",
+                    "url": url,
+                    "payload": payload,
+                    "status": response.status,
+                    "details": f"Triggered {verify_func.__name__} (Len: {len(content)})"
+                }
+            # Detectar códigos de error 500+
+            if response.status >= 500:
+                return {
+                    "type": "server_error",
+                    "url": url,
+                    "payload": payload,
+                    "status": response.status,
+                    "details": f"Server error detected (Len: {len(content)})"
+                }
+        except Exception as e:
+            self.console.print_warning(f"Error testing payload {payload}: {e}")
+        return None
 
 
