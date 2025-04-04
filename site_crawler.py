@@ -526,33 +526,18 @@ class SmartCrawler:
             self.console.print_warning(f"Error analyzing URL {normalized_url}: {e}")
 
     def is_in_scope(self, url: str) -> bool:
-        """Verifica si la URL está dentro del alcance definido."""
-        try:
-            target_domain = urlparse(self.base_url).netloc.lower()
-            parsed_url = urlparse(url)
-            url_domain = parsed_url.netloc.lower()
-            
-            # Permitir archivos .js del dominio objetivo o subdominios
-            if not url_domain.endswith(target_domain) and target_domain not in url_domain:
-                self.console.print_debug(f"URL fuera de scope excluida: {url}")
-                return False
-            
-            # Excluir patrones si existen
-            if self.excluded_patterns:
-                for pattern in self.excluded_patterns:
-                    if re.search(pattern, url, re.IGNORECASE):
-                        self.console.print_debug(f"URL coincidente con patrón de exclusión: {url}")
-                        return False
-            
-            # Incluir explícitamente archivos .js
-            if url.endswith('.js'):
-                self.console.print_debug(f"URL .js incluida: {url}")
-                return True
-            
-            return True
-        except Exception as e:
-            self.console.print_error(f"Error verificando scope de URL {url}: {e}")
+        """Verifica si una URL está dentro del scope, incluyendo subdominios y directorios."""
+        parsed_base = urlparse(self.base_url)
+        parsed_url = urlparse(url)
+        base_domain = parsed_base.netloc  # e.g., hominis.com.ar
+        url_domain = parsed_url.netloc    # e.g., legajo.moron.gob.ar o sub.hominis.com.ar
+        
+        # Permitir subdominios y el dominio exacto
+        if not url_domain.endswith('.' + base_domain) and url_domain != base_domain:
             return False
+        
+        # Asegurar que sea un esquema válido (http/https)
+        return parsed_url.scheme in ['http', 'https']
 
     def _normalize_url(self, url: str) -> str:
         try:
