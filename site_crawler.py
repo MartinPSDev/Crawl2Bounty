@@ -11,6 +11,7 @@ import logging
 import json
 import string
 import os
+from queue import PriorityQueue  # Import PriorityQueue
 
 # Import refactored/new components
 from console_manager import ConsoleManager
@@ -65,7 +66,7 @@ class SmartCrawler:
         self.max_search_depth = 2  # Profundidad máxima para búsquedas
         
         # Initialize crawl state
-        self.crawl_queue = asyncio.Queue()
+        self.crawl_queue = PriorityQueue()  # Cambiar a PriorityQueue
         self.visited_urls = set()
         self.used_terms = set()
         self.interaction_counts = {}
@@ -75,12 +76,13 @@ class SmartCrawler:
         self.context = None
         self.page = None
         
+        self.max_queue_size = 1000  # Aumentar aún más, opcional
+        
         self.console.print_info("SmartCrawler initialized.")
 
     async def start_crawl(self, start_url: str):
         """Start the crawling process."""
         try:
-            # Inicializar Playwright con opciones anti-detección
             playwright = await async_playwright().start()
             self.browser = await playwright.chromium.launch(headless=True, args=[
                 '--disable-blink-features=AutomationControlled',
@@ -89,27 +91,25 @@ class SmartCrawler:
                 '--disable-web-security'
             ])
             
-            # Configurar contexto con opciones anti-detección
             self.context = await self.browser.new_context(
                 viewport={'width': 1920, 'height': 1080},
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             )
             self.page = await self.context.new_page()
             
-            max_queue_size = 500  # Aumentar el límite
             await self.add_to_crawl_queue(start_url, 0)
             
-            while not self.crawl_queue.empty() and self.crawl_queue.qsize() <= max_queue_size:
+            while not self.crawl_queue.empty():
                 try:
-                    url, depth = await self.crawl_queue.get()
+                    depth, url = self.crawl_queue.get_nowait()
                     if url not in self.visited_urls and depth <= self.max_depth:
                         self.visited_urls.add(url)
                         await self._process_single_url(url, depth)
+                    # No detener por tamaño, solo por profundidad
+                    if self.crawl_queue.qsize() > self.max_queue_size:
+                        self.console.print_warning(f"Queue size ({self.crawl_queue.qsize()}) exceeds {self.max_queue_size}, but continuing due to depth priority")
                 except Exception as e:
                     self.console.print_error(f"Error processing queue item: {e}")
-            
-            if self.crawl_queue.qsize() > max_queue_size:
-                self.console.print_warning(f"Queue size exceeded limit ({max_queue_size}), stopping crawl")
         
         except Exception as e:
             self.console.print_error(f"Error during crawl: {e}")
@@ -503,15 +503,11 @@ class SmartCrawler:
 
     async def add_to_crawl_queue(self, url: str, depth: int):
         """Add a URL to the crawl queue if it's in scope and not already visited."""
-        # Normalize URL
         normalized_url = self._normalize_url(url)
-        
-        # Skip if already visited or not in scope
         if normalized_url in self.visited_urls or not self.is_in_scope(normalized_url):
             return
-        
-        # Add to queue
-        await self.crawl_queue.put((normalized_url, depth))
+        # Añadir con prioridad basada en depth (menor depth = mayor prioridad)
+        self.crawl_queue.put_nowait((depth, normalized_url))
         self.console.print_debug(f"Added URL to queue: {normalized_url} (depth: {depth})")
         
         # Analyze URL with SmartDetector
