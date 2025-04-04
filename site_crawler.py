@@ -1301,72 +1301,76 @@ class SmartCrawler:
         except Exception as e:
             self.console.print_error(f"Error analyzing JS file {js_url}: {e}")
 
-    async def test_headers(self, url: str, method: str = "GET"):
-        self.console.print_info(f"Testing headers on {method} {url}")
-        findings = []
+    async def test_vulnerability(self, url: str, method: str = "GET", params: Optional[dict] = None, data: Optional[dict] = None):
+        self.console.print_info(f"Starting vulnerability test on {method} {url}")
         
-        headers_to_test = [
-            "User-Agent", "Referer", "X-Forwarded-For", "Accept", "Content-Type",
-            "Origin", "Cookie", "X-Requested-With", "X-Custom-Header"
-        ]
-        
-        for header in headers_to_test:
-            for category, payloads in PATH_TRAVERSAL_PAYLOADS.items():  # Ejemplo, usa otros payloads si prefieres
-                for payload in payloads:
-                    test_headers = {header: payload}
-                    self.console.print_debug(f"Testing header {header} with {payload}")
-                    try:
-                        response = await self._make_request(url, method, headers=test_headers)
-                        if response.status in [500, 501, 502, 503]:
-                            findings.append({
-                                "type": "header_injection",
-                                "url": url,
-                                "header": header,
-                                "payload": payload,
-                                "status": response.status,
-                                "details": f"Server error detected (Status: {response.status})"
-                            })
-                            self.console.print_success(f"Server error {response.status} on {header}: {payload}")
-                    except Exception as e:
-                        self.console.print_warning(f"Error testing header {header}: {e}")
-        
-        return findings
+        # Detectar WAF primero
+        waf_info = await self.detect_waf(url, method)
+        if waf_info:
+            self.record_finding("waf_detection", "INFO", {
+                "waf": waf_info["waf"], 
+                "signature": waf_info["signature"]
+            }, url)
 
-    async def detect_waf(self, url: str, method: str = "GET"):
+        # Resto del código para realizar pruebas de vulnerabilidad
+        # Aquí puedes continuar con la lógica existente para probar diferentes tipos de vulnerabilidades
+        # ...
+
+    async def detect_waf(self, url: str, method: str = "GET") -> Optional[Dict]:
         self.console.print_info(f"Detecting WAF on {url}")
+        
+        # Lista ampliada de firmas de WAF
         waf_signatures = {
-            "Cloudflare": ["cf-ray", "cloudflare", "__cfduid", "cf-cache-status"],
-            "Akamai": ["akamai-x-cache", "x-akamai-transformed"],
-            "Imperva": ["x-iinfo", "x-cdn"],
-            "Sucuri": ["x-sucuri-id", "sucuri/cloudproxy"],
-            "AWS WAF": ["aws-waf-token", "x-amzn-waf"],
-            "F5 BIG-IP": ["bigipserver", "x-f5-"],
-            "ModSecurity": ["mod_security", "owasp_crs"]
+            "Cloudflare": ["cf-ray", "cloudflare", "__cfduid", "cf-chl-bypass", "cf-cache-status"],
+            "AWS WAF": ["aws-waf-token", "x-amzn-waf", "x-amzn-requestid", "awselb"],
+            "Imperva": ["x-iinfo", "incap_ses", "visid_incap", "x-cdn: Imperva"],
+            "Sucuri": ["x-sucuri-id", "sucuri/cloudproxy", "x-sucuri-cache"],
+            "F5 BIG-IP": ["bigipserver", "f5-traffic", "x-f5-cache"],
+            "Akamai": ["akamai-x-cache", "x-akamai-transformed", "akamaighost"],
+            "Fastly": ["x-fastly-cache", "fastly-debug", "x-served-by: cache"],
+            "Incapsula": ["x-cdn: Incapsula", "x-iinfo", "incap_ses"],
+            "ModSecurity": ["mod_security", "this request has been blocked"],
+            "NGINX WAF": ["nginx", "blocked by nginx"],  # Combinado con mensajes genéricos
         }
         
-        # Enviar una solicitud con un payload básico para detectar WAF
-        test_headers = {"User-Agent": "' OR 1=1 --"}  # Payload simple para provocar respuesta
-        try:
-            response = await self._make_request(url, method, headers=test_headers)
-            headers = {k.lower(): v for k, v in response.headers.items()}
-            body = await response.text()
-            
-            for waf, signatures in waf_signatures.items():
-                for sig in signatures:
-                    if sig in headers or sig in body.lower():
-                        self.console.print_warning(f"WAF detected: {waf} (Signature: {sig})")
-                        return {"waf": waf, "signature": sig}
-            
-            # Verificar códigos de bloqueo típicos de WAF
-            if response.status in [403, 429]:
-                self.console.print_warning(f"Possible WAF detected (Status: {response.status})")
-                return {"waf": "Unknown", "signature": f"Status {response.status}"}
-            
-            self.console.print_debug("No WAF detected")
+        # Payload para provocar una respuesta del WAF
+        test_headers = {
+            "User-Agent": "' OR 1=1 --",
+            "X-Forwarded-For": "127.0.0.1; DROP TABLE users --"
+        }
+        
+        response = await self._make_request(url, method, headers=test_headers, payload_info="WAF Detection")
+        if not response:
+            self.console.print_warning("No response received for WAF detection")
             return None
-        except Exception as e:
-            self.console.print_error(f"Error detecting WAF: {e}")
-            return None
+
+        # Normalizar cabeceras y obtener cuerpo
+        headers = {k.lower(): v.lower() for k, v in response.headers.items()}
+        body = (await response.text()).lower()
+
+        # Buscar firmas específicas
+        detected_waf = None
+        detected_sig = None
+        for waf, signatures in waf_signatures.items():
+            for sig in signatures:
+                if sig in headers or any(sig in value for value in headers.values()) or sig in body:
+                    detected_waf = waf
+                    detected_sig = sig
+                    self.console.print_warning(f"WAF detected: {waf} (Signature: {sig})")
+                    return {"waf": waf, "signature": sig}
+
+        # Si no hay firma específica, verificar códigos de estado
+        if response.status_code in [403, 429, 503]:
+            status_desc = f"Status {response.status_code}"
+            waf_message = "Possible WAF detected"
+            if "server" in headers:
+                server_header = headers["server"]
+                waf_message += f" (Server: {server_header})"
+            self.console.print_warning(f"{waf_message} ({status_desc})")
+            return {"waf": "Unknown", "signature": status_desc}
+
+        self.console.print_debug("No WAF detected")
+        return None
 
     def _generate_js_files_report(self):
         """Genera un reporte separado con todos los archivos JS encontrados."""
