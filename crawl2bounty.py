@@ -381,6 +381,73 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
         await report_generator.generate_report("reporte_error")
         raise
 
+def parse_output_format(output_file: Optional[str]) -> str:
+    """Determina el formato del reporte basado en la extensión del archivo."""
+    if output_file:
+        _, ext = os.path.splitext(output_file)
+        if ext in [".txt", ".md", ".json"]:
+            return ext.lstrip(".")  # Retorna el formato sin el punto
+    return "txt"  # Formato predeterminado
+
+async def async_main(output_file, domain_dir, verbose):
+    loop = asyncio.get_running_loop()
+
+    # Determinar el formato del reporte
+    report_format = parse_output_format(output_file)
+
+    # Inicializa `ReportGenerator`
+    report_generator = ReportGenerator(
+        console_manager=console,
+        output_file=output_file,
+        domain_dir=domain_dir,
+        report_format=report_format  # Pasar el formato al generador
+    )
+
+    # Aquí puedes continuar con la lógica de escaneo
+    console.print_info("Iniciando el escaneo...")
+    report_generator.log_realtime_event("Evento registrado correctamente")
+
+    # Register signal handlers
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop, console)))
+
+    # Initialize components
+    crawler = SmartCrawler(
+        base_url=args.url,
+        max_depth=args.depth,
+        timeout=args.timeout,
+        rate_limit=args.rate_limit,
+        excluded_patterns=args.exclude,
+        included_patterns=args.include,
+        interactsh_url=args.interactsh_url,
+        report_generator=report_generator,
+        force=args.force,
+        domain_dir=domain_dir
+    )
+    detector = SmartDetector(console_manager=console)
+    attack_engine = AttackEngine(console_manager=console, smart_detector=detector, interactsh_url=args.interactsh_url)
+
+    try:
+        await run_scan(
+            crawler=crawler,
+            detector=detector,
+            attack_engine=attack_engine,
+            report_generator=report_generator,
+            save_screenshots=args.screenshots,
+            save_responses=args.responses
+        )
+    except asyncio.CancelledError:
+        console.print_warning("Main scan loop cancelled.")
+        # Generar reporte parcial en caso de interrupción
+        await report_generator.generate_report("reporte_parcial")
+    except Exception as e:
+        logger.error(f"Error durante el escaneo: {e}", exc_info=True)
+        console.print_error(f"Error durante el escaneo: {e}")
+        # Generar reporte de error
+        await report_generator.generate_report("reporte_error")
+    finally:
+        console.print_info("Escaneo finalizado.")
+
 def main():
     """Main function to run the web vulnerability scanner."""
     parser = argparse.ArgumentParser(description='Web Vulnerability Scanner with Advanced Features')
@@ -420,87 +487,6 @@ def main():
 
     # Initialize console early
     console = ConsoleManager(verbose=args.verbose)
-
-    # Pasa los valores necesarios al inicializar `ReportGenerator`
-    report_generator = ReportGenerator(
-        console_manager=console,
-        output_file=args.output,
-        domain_dir=create_domain_directory(args.url)
-    )
-
-    # --- Define the async-aware signal handling logic ---
-    async def shutdown(sig, loop, console):
-        console.print_warning(f"\nReceived exit signal {sig.name}...")
-        console.print_info("Attempting graceful shutdown, cancelling tasks...")
-
-        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-        if not tasks:
-            console.print_info("No pending tasks to cancel.")
-            return
-
-        # Cancel all tasks
-        for task in tasks:
-            task.cancel()
-
-        try:
-            # Wait for tasks to finish cancelling with a timeout
-            await asyncio.wait(tasks, timeout=5)
-        except asyncio.CancelledError:
-            console.print_warning("Some tasks did not finish in time.")
-
-        # Forcefully close the loop if tasks are still pending
-        pending_tasks = [t for t in asyncio.all_tasks() if not t.done()]
-        if pending_tasks:
-            console.print_warning(f"Forcing shutdown. {len(pending_tasks)} tasks are still pending.")
-            for task in pending_tasks:
-                task.cancel()
-            loop.stop()
-
-        console.print_info("Shutdown complete.")
-
-    async def async_main(output_file, domain_dir, verbose):
-        loop = asyncio.get_running_loop()
-
-        # Register signal handlers
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop, console)))
-
-        # Initialize components
-        crawler = SmartCrawler(
-            base_url=args.url,
-            max_depth=args.depth,
-            timeout=args.timeout,
-            rate_limit=args.rate_limit,
-            excluded_patterns=args.exclude,
-            included_patterns=args.include,
-            interactsh_url=args.interactsh_url,
-            report_generator=report_generator,
-            force=args.force,
-            domain_dir=domain_dir
-        )
-        detector = SmartDetector(console_manager=console)
-        attack_engine = AttackEngine(console_manager=console, smart_detector=detector, interactsh_url=args.interactsh_url)
-
-        try:
-            await run_scan(
-                crawler=crawler,
-                detector=detector,
-                attack_engine=attack_engine,
-                report_generator=report_generator,
-                save_screenshots=args.screenshots,
-                save_responses=args.responses
-            )
-        except asyncio.CancelledError:
-            console.print_warning("Main scan loop cancelled.")
-            # Generar reporte parcial en caso de interrupción
-            await report_generator.generate_report("reporte_parcial")
-        except Exception as e:
-            logger.error(f"Error durante el escaneo: {e}", exc_info=True)
-            console.print_error(f"Error durante el escaneo: {e}")
-            # Generar reporte de error
-            await report_generator.generate_report("reporte_error")
-        finally:
-            console.print_info("Escaneo finalizado.")
 
     try:
         asyncio.run(async_main(

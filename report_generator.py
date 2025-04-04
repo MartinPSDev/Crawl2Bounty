@@ -30,7 +30,7 @@ logger.addHandler(handler)
 console = ConsoleManager(verbose=True)
 
 class ReportGenerator:
-    def __init__(self, console_manager: ConsoleManager, output_file: str = None, domain_dir: str = None):
+    def __init__(self, console_manager: ConsoleManager, output_file: str = None, domain_dir: str = None, report_format: str = "txt"):
         self.console = console_manager
         self.findings = defaultdict(list)
         self.metadata = {
@@ -51,6 +51,7 @@ class ReportGenerator:
             }
         }
         self.domain_dir = domain_dir or 'reports'
+        self.report_format = report_format  # Formato del reporte
         os.makedirs(self.domain_dir, exist_ok=True)
 
     def log_realtime_event(self, message: str, *args):
@@ -69,22 +70,65 @@ class ReportGenerator:
         }
 
     async def generate_report(self, filename_prefix: str):
-        """Genera el reporte en formato JSON."""
+        """Genera el reporte en el formato especificado."""
         try:
-            report_path = os.path.join(self.domain_dir, f"{filename_prefix}.json")
-            async with aiofiles.open(report_path, 'w') as report_file:
-                await report_file.write(json.dumps({
-                    "metadata": {
-                        **self.metadata,
-                        "vulnerability_types": list(self.metadata["vulnerability_types"])  # Convertir set a lista
-                    },
-                    "summary": self._generate_summary(),
-                    "findings": self.findings
-                }, indent=4))
+            report_path = os.path.join(self.domain_dir, f"{filename_prefix}.{self.report_format}")
+            
+            if self.report_format == "json":
+                await self._generate_json_report(report_path)
+            elif self.report_format == "txt":
+                await self._generate_txt_report(report_path)
+            elif self.report_format == "md":
+                await self._generate_markdown_report(report_path)
+            else:
+                raise ValueError(f"Formato no soportado: {self.report_format}")
+            
             self.console.print_success(f"Reporte guardado en: {report_path}")
         except Exception as e:
             self.console.print_error(f"Error al generar el reporte: {e}")
             logger.error(f"Error al generar el reporte: {e}", exc_info=True)
+
+    async def _generate_json_report(self, report_path: str):
+        """Genera el reporte en formato JSON."""
+        async with aiofiles.open(report_path, 'w') as report_file:
+            await report_file.write(json.dumps({
+                "metadata": {
+                    **self.metadata,
+                    "vulnerability_types": list(self.metadata["vulnerability_types"])  # Convertir set a lista
+                },
+                "summary": self._generate_summary(),
+                "findings": self.findings
+            }, indent=4))
+
+    async def _generate_txt_report(self, report_path: str):
+        """Genera el reporte en formato TXT."""
+        async with aiofiles.open(report_path, 'w') as report_file:
+            await report_file.write("=== Resumen del Escaneo ===\n")
+            await report_file.write(f"Inicio del escaneo: {self.metadata['scan_start']}\n")
+            await report_file.write(f"Fin del escaneo: {self.metadata['scan_end']}\n")
+            await report_file.write(f"Duración: {self.metadata['scan_duration_seconds']} segundos\n")
+            await report_file.write(f"Total de URLs escaneadas: {self.metadata['total_urls']}\n")
+            await report_file.write(f"Total de hallazgos: {self.metadata['total_findings']}\n")
+            await report_file.write("\n=== Hallazgos ===\n")
+            for category, findings in self.findings.items():
+                await report_file.write(f"\n{category}:\n")
+                for finding in findings:
+                    await report_file.write(f"- {finding}\n")
+
+    async def _generate_markdown_report(self, report_path: str):
+        """Genera el reporte en formato Markdown."""
+        async with aiofiles.open(report_path, 'w') as report_file:
+            await report_file.write("# Resumen del Escaneo\n")
+            await report_file.write(f"- **Inicio del escaneo:** {self.metadata['scan_start']}\n")
+            await report_file.write(f"- **Fin del escaneo:** {self.metadata['scan_end']}\n")
+            await report_file.write(f"- **Duración:** {self.metadata['scan_duration_seconds']} segundos\n")
+            await report_file.write(f"- **Total de URLs escaneadas:** {self.metadata['total_urls']}\n")
+            await report_file.write(f"- **Total de hallazgos:** {self.metadata['total_findings']}\n")
+            await report_file.write("\n## Hallazgos\n")
+            for category, findings in self.findings.items():
+                await report_file.write(f"\n### {category}\n")
+                for finding in findings:
+                    await report_file.write(f"- {finding}\n")
 
 async def run_scan(crawler, detector, attack_engine, report_generator, save_screenshots=False, save_responses=False):
     from site_crawler import SmartCrawler  # Importación dentro de la función
