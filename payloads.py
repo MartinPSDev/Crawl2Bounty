@@ -473,3 +473,39 @@ OOB_PAYLOADS = {
 }
 
 # Add other categories as needed: SSRF, Header Injection, NoSQL Injection, LFI specific variations etc.
+
+async def test_xss(self, url, method, base_params, base_data, field):
+    vuln_type = "XSS"
+    test_key = self._get_test_key(method, url, field, vuln_type)
+
+    if self._was_tested(test_key):
+        return
+    self._mark_tested(test_key)
+
+    # Probar payloads de XSS
+    for category, payloads in XSS_PAYLOADS.items():
+        if isinstance(payloads, dict):  # Permitir iterar sobre subcategorías
+            for subcategory, sub_payloads in payloads.items():
+                for payload_template in sub_payloads:
+                    # Ejecutar pruebas con cada payload
+                    await run_check(category, sub_payloads, self._verify_xss_reflection, f"XSS {subcategory} Check")
+        else:
+            for payload_template in payloads:
+                # Ejecutar pruebas con cada payload
+                await run_check(category, payloads, self._verify_xss_reflection, f"XSS Check")
+
+async def test_ssti(self, url, method, base_params, base_data, field):
+    vuln_type = "SSTI"
+    test_key = self._get_test_key(method, url, field, vuln_type)
+
+    if self._was_tested(test_key):
+        return
+    self._mark_tested(test_key)
+
+    # Probar payloads de SSTI
+    if await run_check("detection", SSTI_PAYLOADS['code_execution']['jinja2'], self._verify_ssti_calc, f"Calculation Result"):
+        return
+    if self.interactsh_url:
+        for framework, payloads in SSTI_PAYLOADS['code_execution'].items():
+            if await run_check("oob", payloads, self._verify_oob, "OOB Interaction"):
+                return
