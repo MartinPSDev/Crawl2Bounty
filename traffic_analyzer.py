@@ -44,6 +44,16 @@ class TrafficAnalyzer:
         except Exception as e:
             self.console.print_error(f"Error al adjuntar manejadores de tráfico: {e}")
 
+    async def stop_capture(self, browser_context: BrowserContext):
+        """Detiene la captura limpiando manejadores."""
+        self.console.print_debug("Stopping traffic capture...")
+        try:
+            browser_context.remove_listener("request", self._handle_request)
+            browser_context.remove_listener("response", self._handle_response)
+            browser_context.remove_listener("requestfailed", self._handle_request_failed)
+        except Exception as e:
+            self.console.print_error(f"Error detaching traffic handlers: {e}")
+
     def _handle_request(self, request: Request):
         """Callback para el evento 'request'."""
         try:
