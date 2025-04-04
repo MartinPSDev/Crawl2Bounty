@@ -1300,3 +1300,34 @@ class SmartCrawler:
                 
         except Exception as e:
             self.console.print_error(f"Error analyzing JS file {js_url}: {e}")
+
+    async def test_headers(self, url: str, method: str = "GET"):
+        self.console.print_info(f"Testing headers on {method} {url}")
+        findings = []
+        
+        headers_to_test = [
+            "User-Agent", "Referer", "X-Forwarded-For", "Accept", "Content-Type",
+            "Origin", "Cookie", "X-Requested-With", "X-Custom-Header"
+        ]
+        
+        for header in headers_to_test:
+            for category, payloads in PATH_TRAVERSAL_PAYLOADS.items():  # Ejemplo, usa otros payloads si prefieres
+                for payload in payloads:
+                    test_headers = {header: payload}
+                    self.console.print_debug(f"Testing header {header} with {payload}")
+                    try:
+                        response = await self._make_request(url, method, headers=test_headers)
+                        if response.status in [500, 501, 502, 503]:
+                            findings.append({
+                                "type": "header_injection",
+                                "url": url,
+                                "header": header,
+                                "payload": payload,
+                                "status": response.status,
+                                "details": f"Server error detected (Status: {response.status})"
+                            })
+                            self.console.print_success(f"Server error {response.status} on {header}: {payload}")
+                    except Exception as e:
+                        self.console.print_warning(f"Error testing header {header}: {e}")
+        
+        return findings
