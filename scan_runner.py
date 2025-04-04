@@ -4,12 +4,24 @@ from attack_engine import AttackEngine
 from report_generator import ReportGenerator
 import asyncio
 import logging
+from urllib.parse import urlparse
 
-async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine: AttackEngine, report_generator: ReportGenerator, save_screenshots: bool = False, save_responses: bool = False):
+async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine: AttackEngine, report_generator: ReportGenerator, save_screenshots: bool = False, save_responses: bool = False, output_format: str = 'txt'):
     """Ejecuta el escaneo completo."""
     try:
-        # Iniciar el crawling
+        logger.info(f"Iniciando escaneo en {crawler.base_url}")
         await crawler.start_crawl(crawler.base_url)
+        logger.debug(f"URLs visitadas: {len(crawler.visited_urls)}")
+        
+        # Forzar el uso de AttackEngine
+        logger.info("Iniciando pruebas de vulnerabilidades con AttackEngine")
+        for url in crawler.visited_urls:
+            logger.debug(f"Probando vulnerabilidades en {url}")
+            await attack_engine.test_vulnerability(url, method="GET")  # Prueba básica en la URL
+            # Si SmartCrawler recolecta parámetros o formularios, agrégalos aquí
+            if hasattr(crawler, 'forms') and crawler.forms.get(url):
+                for form in crawler.forms[url]:
+                    await attack_engine.test_vulnerability(url, method=form.get('method', 'GET'), data=form.get('data', {}))
         
         # Analizar URLs descubiertas
         for url in crawler.visited_urls:
@@ -46,7 +58,7 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
                 continue
         
         # Generar reporte final
-        await report_generator.generate_report("reporte_final")
+        await report_generator.generate_report(f"report_{urlparse(crawler.base_url).netloc}")
         
     except asyncio.CancelledError:
         logging.info("Escaneo interrumpido por el usuario")
