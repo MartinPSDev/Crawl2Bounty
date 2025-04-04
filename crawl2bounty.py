@@ -201,28 +201,36 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
         logger.info(f"Iniciando escaneo en {crawler.base_url}")
         await crawler.start_crawl(crawler.base_url)
         logger.debug(f"URLs visitadas: {len(crawler.visited_urls)}")
-        for url in crawler.visited_urls:
-            try:
-                async with asyncio.timeout(60):
-                    logger.debug(f"Procesando URL: {url}")
-                    js_findings = await detector.analyze_js(url)
-                    if js_findings:
-                        report_generator.add_findings("javascript_analysis", js_findings)
-                    dynamic_findings = await detector.analyze_dynamic_content(url)
-                    if dynamic_findings:
-                        report_generator.add_findings("dynamic_analysis", dynamic_findings)
-                    if attack_engine.interactsh_url:
-                        vuln_findings = await attack_engine.test_vulnerability(url)
-                        if vuln_findings:
-                            report_generator.add_findings("vulnerability_scan", vuln_findings)
-                    if save_screenshots:
-                        await crawler.save_screenshot(url)
-                    if save_responses:
-                        await crawler.save_response(url)
-            except asyncio.TimeoutError:
-                logger.error(f"Timeout procesando URL {url}")
-            except Exception as e:
-                logger.error(f"Error procesando URL {url}: {e}")
+        
+        # Usar la página de SmartCrawler para análisis dinámico
+        if crawler.page:
+            for url in crawler.visited_urls:
+                try:
+                    async with asyncio.timeout(60):
+                        logger.debug(f"Procesando URL: {url}")
+                        # Navegar a la URL para análisis dinámico
+                        await crawler.page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                        js_findings = await detector.analyze_js(await crawler.page.content())
+                        if js_findings:
+                            report_generator.add_findings("javascript_analysis", js_findings)
+                        dynamic_findings = await detector.analyze_dynamic_content(crawler.page)
+                        if dynamic_findings:
+                            report_generator.add_findings("dynamic_analysis", dynamic_findings)
+                        if attack_engine.interactsh_url:
+                            vuln_findings = await attack_engine.test_vulnerability(url)
+                            if vuln_findings:
+                                report_generator.add_findings("vulnerability_scan", vuln_findings)
+                        if save_screenshots:
+                            await crawler.save_screenshot(url)
+                        if save_responses:
+                            await crawler.save_response(url)
+                except asyncio.TimeoutError:
+                    logger.error(f"Timeout procesando URL {url}")
+                except Exception as e:
+                    logger.error(f"Error procesando URL {url}: {e}")
+        else:
+            logger.warning("No se pudo acceder a la página de SmartCrawler para análisis dinámico")
+
         filename = f"report_final_{urlparse(crawler.base_url).netloc}"
         logger.debug(f"Generando reporte: {filename}")
         await report_generator.generate_report(filename)
@@ -292,7 +300,6 @@ def main():
     try:
         logger.debug("Instanciando componentes...")
         report_generator = ReportGenerator(console, domain_dir=domain_dir, report_format=args.output)
-        # Ajustar la llamada a SmartCrawler para coincidir con su firma
         crawler = SmartCrawler(
             base_url=normalized_url,
             max_depth=args.depth,
