@@ -291,6 +291,15 @@ async def run_scan(crawler, detector, attack_engine, report_generator, save_scre
                         f.write(f"- {finding}\n")
             self.console.print_success(f"TXT report saved to: {txt_filename}")
 
+async def shutdown(signal: signal.Signals, loop: asyncio.AbstractEventLoop):
+    """Cierra todas las tareas al recibir una señal."""
+    print("\nRecibido Ctrl+C, cerrando...")
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    loop.stop()
+
 def main():
     # Lógica de tu aplicación
     pass  # Aquí va tu código
