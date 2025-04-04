@@ -1331,3 +1331,39 @@ class SmartCrawler:
                         self.console.print_warning(f"Error testing header {header}: {e}")
         
         return findings
+
+    async def detect_waf(self, url: str, method: str = "GET"):
+        self.console.print_info(f"Detecting WAF on {url}")
+        waf_signatures = {
+            "Cloudflare": ["cf-ray", "cloudflare", "__cfduid", "cf-cache-status"],
+            "Akamai": ["akamai-x-cache", "x-akamai-transformed"],
+            "Imperva": ["x-iinfo", "x-cdn"],
+            "Sucuri": ["x-sucuri-id", "sucuri/cloudproxy"],
+            "AWS WAF": ["aws-waf-token", "x-amzn-waf"],
+            "F5 BIG-IP": ["bigipserver", "x-f5-"],
+            "ModSecurity": ["mod_security", "owasp_crs"]
+        }
+        
+        # Enviar una solicitud con un payload básico para detectar WAF
+        test_headers = {"User-Agent": "' OR 1=1 --"}  # Payload simple para provocar respuesta
+        try:
+            response = await self._make_request(url, method, headers=test_headers)
+            headers = {k.lower(): v for k, v in response.headers.items()}
+            body = await response.text()
+            
+            for waf, signatures in waf_signatures.items():
+                for sig in signatures:
+                    if sig in headers or sig in body.lower():
+                        self.console.print_warning(f"WAF detected: {waf} (Signature: {sig})")
+                        return {"waf": waf, "signature": sig}
+            
+            # Verificar códigos de bloqueo típicos de WAF
+            if response.status in [403, 429]:
+                self.console.print_warning(f"Possible WAF detected (Status: {response.status})")
+                return {"waf": "Unknown", "signature": f"Status {response.status}"}
+            
+            self.console.print_debug("No WAF detected")
+            return None
+        except Exception as e:
+            self.console.print_error(f"Error detecting WAF: {e}")
+            return None
