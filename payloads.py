@@ -499,7 +499,7 @@ async def test_vulnerability(self, url: str, method: str = "GET", params=None, d
                     if finding:
                         findings.append(finding)
     
-    # Probar todas las categorías, incluso sin params/data
+    # Probar todas las categorías
     await test_payloads(SQLI_PAYLOADS, "SQLi", self._verify_sqli_error)
     await test_payloads(XSS_PAYLOADS, "XSS", self._verify_xss_reflection)
     await test_payloads(CMD_PAYLOADS, "CMDi", self._verify_cmdi_time)
@@ -522,15 +522,10 @@ async def test_headers(self, url: str, method: str = "GET"):
     self.console.print_info(f"Testing headers on {method} {url}")
     findings = []
     
-    headers_to_test = [
-        "User-Agent", "Referer", "X-Forwarded-For", "Accept", "Content-Type",
-        "Origin", "Cookie", "X-Requested-With", "X-Custom-Header"
-    ]
-    
-    # Usar payloads variados de todas las categorías
+    headers_to_test = ["User-Agent", "Referer", "X-Forwarded-For", "Cookie"]
     all_payloads = {
-        "SQLi": SQLI_PAYLOADS["error_based"] + SQLI_PAYLOADS["waf_evasion"],
-        "XSS": XSS_PAYLOADS["attribute_injection"] + XSS_PAYLOADS["filter_evasion"],
+        "SQLi": SQLI_PAYLOADS["error_based"],
+        "XSS": XSS_PAYLOADS["filter_evasion"],
         "CMDi": CMD_PAYLOADS["blind_time"],
         "PathTraversal": PATH_TRAVERSAL_PAYLOADS["encoding_bypass"]
     }
@@ -542,6 +537,7 @@ async def test_headers(self, url: str, method: str = "GET"):
                 self.console.print_debug(f"Testing header {header} with {vuln_type}: {payload}")
                 try:
                     response = await self._make_request(url, method, headers=test_headers)
+                    content = await response.text()
                     if response.status >= 500:
                         findings.append({
                             "type": "header_injection",
@@ -549,12 +545,30 @@ async def test_headers(self, url: str, method: str = "GET"):
                             "header": header,
                             "payload": payload,
                             "status": response.status,
-                            "details": f"Server error detected (Len: {len(await response.text())})"
+                            "details": f"Server error (Len: {len(content)})"
                         })
                         self.console.print_success(f"Server error {response.status} on {header}: {payload}")
-                    elif response.status in [403, 429]:
-                        self.console.print_warning(f"Possible WAF block on {header}: {payload} (Status: {response.status})")
+                    elif "alert(" in content or "error" in content.lower():
+                        findings.append({
+                            "type": vuln_type,
+                            "url": url,
+                            "header": header,
+                            "payload": payload,
+                            "status": response.status,
+                            "details": f"Possible {vuln_type} in header (Len: {len(content)})"
+                        })
                 except Exception as e:
-                    self.console.print_warning(f"Error testing header {header} with {payload}: {e}")
-    
+                    self.console.print_warning(f"Error testing header {header}: {e}")
     return findings
+
+async def _verify_path_traversal(self, response):
+    content = await response.text().lower()
+    sensitive_keywords = ["/etc/passwd", "root:", "/windows/", "win.ini"]
+    if response.status == 200 and any(keyword in content for keyword in sensitive_keywords):
+        self.console.print_debug("Path traversal confirmed: sensitive content found")
+        return True
+    if response.status >= 500 and "error" in content:
+        self.console.print_debug("Path traversal possible: server error")
+        return True
+    self.console.print_debug("Path traversal not confirmed")
+    return False
