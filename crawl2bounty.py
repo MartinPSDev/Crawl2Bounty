@@ -20,6 +20,7 @@ import requests
 from packaging import version
 import json
 import functools
+import shutil
 
 # Constantes de configuración
 MAX_DEPTH = 10  # Profundidad máxima recomendada
@@ -152,20 +153,50 @@ def update_tool():
                 "temp_update"
             ], check=True)
             
-            # Copiar archivos actualizados
+            # Reemplazar archivos locales con la versión actualizada
+            console.print_info("Reemplazando archivos locales con la versión actualizada...")
+            
+            # --- Definir elementos a preservar ---
+            items_to_preserve = [
+                'reports',          # Directorio para resultados de escaneo
+                '.git',             # Por si acaso (aunque este bloque se ejecuta si no es git)
+                'temp_update',      # El directorio que acabamos de clonar
+                'config.json',      # Preservar configuración del usuario
+                '.env',             # Preservar variables de entorno si se usan
+            ]
+            items_to_preserve = {item for item in items_to_preserve if item}  # Filtrar valores vacíos
+
+            root_dir = "."
+            console.print_debug(f"Preservando: {items_to_preserve}")
+            
+            # Eliminar archivos y directorios que no están en la lista de preservación
+            for item in os.listdir(root_dir):
+                if item not in items_to_preserve:
+                    item_path = os.path.join(root_dir, item)
+                    try:
+                        if os.path.isdir(item_path):
+                            shutil.rmtree(item_path)
+                            console.print_debug(f"Eliminado directorio: {item_path}")
+                        elif os.path.isfile(item_path):
+                            os.remove(item_path)
+                            console.print_debug(f"Eliminado archivo: {item_path}")
+                    except OSError as e:
+                        console.print_warning(f"No se pudo eliminar {item_path}: {e}")
+            
+            # Copiar archivos actualizados desde el directorio temporal
             for file in os.listdir("temp_update"):
-                if file != ".git":
+                if file not in items_to_preserve:  # Evitar sobrescribir elementos preservados
                     src = os.path.join("temp_update", file)
                     dst = os.path.join(".", file)
                     if os.path.isdir(src):
                         if os.path.exists(dst):
-                            subprocess.run(["rm", "-rf", dst])
-                        subprocess.run(["cp", "-r", src, "."])
+                            shutil.rmtree(dst)
+                        shutil.copytree(src, dst)
                     else:
-                        subprocess.run(["cp", src, dst])
+                        shutil.copy2(src, dst)
             
             # Limpiar directorio temporal
-            subprocess.run(["rm", "-rf", "temp_update"])
+            shutil.rmtree("temp_update")
         
         # Instalar dependencias actualizadas
         console.print_info("Instalando dependencias actualizadas...")
@@ -174,7 +205,7 @@ def update_tool():
         if os.path.exists('/etc/kali-release'):
             console.print_info("Detectado Kali Linux. Instalando dependencias en el entorno virtual actual...")
             
-            # Verificar si estamos en un entorno virtual usando múltiples métodos
+            # Verificar si estamos en un entorno virtual
             is_venv = (
                 hasattr(sys, 'real_prefix') or  # virtualenv
                 (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix) or  # venv
@@ -183,11 +214,9 @@ def update_tool():
             
             if is_venv:
                 console.print_info("Entorno virtual detectado. Usando pip del entorno virtual...")
-                # Usar pip del entorno virtual actual
                 subprocess.run(['python3', '-m', 'pip', 'install', '--upgrade', 'pip'], check=True)
                 subprocess.run(['python3', '-m', 'pip', 'install', '-r', 'requirements.txt'], check=True)
             else:
-                # No estamos en un entorno virtual, usar pipx
                 console.print_info("Usando pipx para instalar dependencias...")
                 try:
                     subprocess.run(['pipx', 'install', '-r', 'requirements.txt'], check=True)
@@ -196,7 +225,6 @@ def update_tool():
                     subprocess.run(['apt', 'install', '-y', 'pipx'], check=True)
                     subprocess.run(['pipx', 'install', '-r', 'requirements.txt'], check=True)
         else:
-            # Para otros sistemas, usar pip normal
             subprocess.run(['pip', 'install', '-r', 'requirements.txt'], check=True)
         
         console.print_success("Actualización completada exitosamente!")
