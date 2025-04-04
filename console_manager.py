@@ -7,6 +7,7 @@ from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeEl
 from rich.theme import Theme
 from typing import Any
 import argparse
+from urllib.parse import urlparse
 
 # Define a custom theme (optional)
 custom_theme = Theme({
@@ -155,6 +156,14 @@ class ConsoleManager:
             console=self.console,
             transient=True # Clears progress bar on completion
          )
+
+def validate_target_url(url: str) -> bool:
+    """Valida que la URL objetivo sea válida."""
+    try:
+        parsed = urlparse(url)
+        return bool(parsed.scheme and parsed.netloc)  # Asegúrate de que haya un esquema y un dominio
+    except Exception:
+        return False
 
 def main():
     """Función principal para ejecutar el escáner de vulnerabilidades web."""
