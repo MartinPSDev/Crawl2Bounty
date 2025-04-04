@@ -298,7 +298,7 @@ def validate_depth(depth: int) -> bool:
     """Valida que la profundidad de rastreo esté dentro de los límites permitidos."""
     return MIN_DEPTH <= depth <= MAX_DEPTH
 
-async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine: AttackEngine, report_generator: ReportGenerator, save_screenshots: bool = False, save_responses: bool = False):
+async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine: AttackEngine, report_generator: ReportGenerator, save_screenshots: bool = False, save_responses: bool = False, output_format: str = 'txt'):
     """Ejecuta el escaneo completo."""
     try:
         # Iniciar el crawling
@@ -339,16 +339,16 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
                 continue
         
         # Generar reporte final
-        await report_generator.generate_report("reporte_final")
+        await report_generator.generate_report("reporte_final", output_format)
         
     except asyncio.CancelledError:
         logging.info("Escaneo interrumpido por el usuario")
         # Asegurar que se genere un reporte parcial
-        await report_generator.generate_report("reporte_parcial")
+        await report_generator.generate_report("reporte_parcial", output_format)
     except Exception as e:
         logging.error(f"Error durante el escaneo: {e}")
         # Asegurar que se genere un reporte parcial
-        await report_generator.generate_report("reporte_error")
+        await report_generator.generate_report("reporte_error", output_format)
         raise
 
 def main():
@@ -364,7 +364,7 @@ def main():
     parser.add_argument('--responses', action='store_true', help='Save page responses')
     parser.add_argument('--interactsh-url', help='Interactsh URL for OOB testing')
     parser.add_argument('--force', '-f', action='store_true', help='Forzar el análisis de dominios normalmente excluidos (redes sociales, etc.)')
-    parser.add_argument('-o', '--output', help='Nombre del archivo de salida para el reporte')
+    parser.add_argument('-o', '--output', choices=['txt', 'json', 'md'], default='txt', help='Formato del archivo de salida (txt, json, md)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Modo verbose para mostrar más información')
     parser.add_argument('-u', '--update', action='store_true', help='Actualizar la herramienta desde GitHub')
     
@@ -435,7 +435,8 @@ def main():
             attack_engine=attack_engine,
             report_generator=report_generator,
             save_screenshots=args.screenshots,
-            save_responses=args.responses
+            save_responses=args.responses,
+            output_format=args.output
         ))
         
     except KeyboardInterrupt:

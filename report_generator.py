@@ -263,8 +263,8 @@ class ReportGenerator:
 
         return "INFO"
 
-    def generate_report(self, filename_prefix: str):
-        """Generates the JSON report file."""
+    def generate_report(self, filename_prefix: str, format: str = 'txt'):
+        """Genera el archivo de reporte en el formato especificado."""
         self.finalize_report()
 
         report_summary = self.generate_summary()
@@ -275,24 +275,39 @@ class ReportGenerator:
             "findings": {section: findings_list for section, findings_list in self.findings.items() if findings_list}
         }
 
-        json_filename = f"{filename_prefix}.json"
-        try:
-            with open(json_filename, "w", encoding="utf-8") as f:
-                json.dump(report_data, f, indent=2, ensure_ascii=False, default=str)
-            self.console.print_success(f"JSON report saved to: {json_filename}")
-        except TypeError as e:
-            self.console.print_error(f"Failed to serialize report data to JSON for {json_filename}: {e}")
-            self.console.print_warning("Attempting fallback JSON serialization...")
+        if format == 'json':
+            json_filename = f"{filename_prefix}.json"
             try:
-                def fallback_serializer(obj):
-                    if isinstance(obj, (datetime, time.struct_time)): return str(obj)
-                    if isinstance(obj, bytes): return obj.decode('utf-8', errors='replace')
-                    return repr(obj)
-                with open(json_filename + ".fallback", "w", encoding="utf-8") as f:
-                    json.dump(report_data, f, indent=2, ensure_ascii=False, default=fallback_serializer)
-                self.console.print_success(f"Fallback JSON report saved to: {json_filename}.fallback")
-            except Exception as fallback_e:
-                self.console.print_error(f"Fallback JSON serialization also failed: {fallback_e}")
+                with open(json_filename, "w", encoding="utf-8") as f:
+                    json.dump(report_data, f, indent=2, ensure_ascii=False, default=str)
+                self.console.print_success(f"JSON report saved to: {json_filename}")
+            except TypeError as e:
+                self.console.print_error(f"Failed to serialize report data to JSON for {json_filename}: {e}")
+                self.console.print_warning("Attempting fallback JSON serialization...")
+                try:
+                    def fallback_serializer(obj):
+                        if isinstance(obj, (datetime, time.struct_time)): return str(obj)
+                        if isinstance(obj, bytes): return obj.decode('utf-8', errors='replace')
+                        return repr(obj)
+                    with open(json_filename + ".fallback", "w", encoding="utf-8") as f:
+                        json.dump(report_data, f, indent=2, ensure_ascii=False, default=fallback_serializer)
+                    self.console.print_success(f"Fallback JSON report saved to: {json_filename}.fallback")
+                except Exception as fallback_e:
+                    self.console.print_error(f"Fallback JSON serialization also failed: {fallback_e}")
 
-        except Exception as e:
-            self.console.print_error(f"Failed to write JSON report to {json_filename}: {e}")
+        elif format == 'md':
+            # Lógica para generar archivo Markdown
+            pass
+        else:  # Por defecto, generar en formato txt
+            txt_filename = os.path.join(self.domain_dir, f"{filename_prefix}.txt")
+            with open(txt_filename, "w", encoding="utf-8") as f:
+                f.write("Reporte\n")
+                f.write("========\n")
+                f.write(f"Metadata: {self.metadata}\n")
+                f.write(f"Resumen: {report_summary}\n")
+                f.write("Hallazgos:\n")
+                for section, findings in report_data['findings'].items():
+                    f.write(f"{section}:\n")
+                    for finding in findings:
+                        f.write(f"- {finding}\n")
+            self.console.print_success(f"TXT report saved to: {txt_filename}")
