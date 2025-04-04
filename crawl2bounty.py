@@ -11,7 +11,6 @@ import requests
 from typing import Optional
 from urllib.parse import urlparse
 from packaging import version
-from rich.console import Console
 from site_crawler import SmartCrawler
 from console_manager import ConsoleManager
 from report_generator import ReportGenerator
@@ -129,7 +128,6 @@ def update_tool():
 def create_domain_directory(url: str) -> str:
     """Crea un directorio para el dominio y retorna su ruta."""
     try:
-        # Extraer dominio incluso si no hay esquema
         parsed = urlparse(url)
         domain = parsed.netloc.lower() if parsed.netloc else url.split('/')[0].lower()
         domain_dir = os.path.join('reports', domain)
@@ -168,7 +166,7 @@ def display_banner(console: ConsoleManager):
     by @M4rt1n_0x1337
     Version 1.1.0 - Advanced Web Recognition
     """
-    console.print(f"[bold cyan]{banner}[/bold cyan]\n", highlight=False)
+    console.print_info(f"[bold cyan]{banner}[/bold cyan]")  # Usar print_info en lugar de print
 
 def validate_target_url(url: str) -> str:
     """Valida y normaliza la URL objetivo, añadiendo esquema si falta."""
@@ -177,9 +175,9 @@ def validate_target_url(url: str) -> str:
         if not parsed.scheme:
             normalized_url = f"https://{url}"  # Por defecto usa HTTPS
             logger.debug(f"Esquema añadido: {normalized_url}")
-            parsed = urlparse(normalized_url)
         else:
             normalized_url = url
+        parsed = urlparse(normalized_url)
         if not parsed.netloc:
             logger.error(f"URL inválida: {url} - No se detectó dominio válido")
             return ""
@@ -238,7 +236,7 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
 
 async def shutdown(signal: signal.Signals, loop: asyncio.AbstractEventLoop, console: ConsoleManager, attack_engine: AttackEngine):
     """Cierra todas las tareas y recursos al recibir una señal."""
-    console.print_warning(f"\nRecibida señal {signal.name}. Cerrando...")
+    console.print_warning(f"Recibida señal {signal.name}. Cerrando...")
     logger.info(f"Cerrando por señal: {signal.name}")
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     for task in tasks:
