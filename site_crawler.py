@@ -4,7 +4,7 @@ import re
 from typing import Set, Dict, List, Optional, Tuple, Any
 from urllib.parse import urljoin, urlparse, parse_qs, urlencode
 import jsbeautifier
-from playwright.async_api import Page, async_playwright
+from playwright.async_api import Page, async_playwright, TimeoutError as PlaywrightTimeoutError
 from datetime import datetime
 import time
 import logging
@@ -78,6 +78,8 @@ class SmartCrawler:
         
         self.max_queue_size = 1000  # Aumentar aún más, opcional
         
+        self.js_files = set()  # Nueva lista para almacenar archivos JS
+        
         self.console.print_info("SmartCrawler initialized.")
 
     async def start_crawl(self, start_url: str):
@@ -110,6 +112,9 @@ class SmartCrawler:
                         self.console.print_warning(f"Queue size ({self.crawl_queue.qsize()}) exceeds {self.max_queue_size}, but continuing due to depth priority")
                 except Exception as e:
                     self.console.print_error(f"Error processing queue item: {e}")
+            
+            # Generar reporte de archivos JS al finalizar
+            self._generate_js_files_report()
         
         except Exception as e:
             self.console.print_error(f"Error during crawl: {e}")
@@ -1291,6 +1296,7 @@ class SmartCrawler:
                 if self.is_in_scope(embedded_url):
                     await self.add_to_crawl_queue(embedded_url, depth + 1)
                     self.console.print_debug(f"Found embedded URL in JS: {embedded_url}")
+                    self.js_files.add(embedded_url)
                 
         except Exception as e:
             self.console.print_error(f"Error analyzing JS file {js_url}: {e}")
@@ -1361,3 +1367,20 @@ class SmartCrawler:
         except Exception as e:
             self.console.print_error(f"Error detecting WAF: {e}")
             return None
+
+    def _generate_js_files_report(self):
+        """Genera un reporte separado con todos los archivos JS encontrados."""
+        if not self.js_files:
+            self.console.print_info("No JavaScript files found during crawl.")
+            return
+
+        report_path = f"{self.report_generator.output_dir}/{self.base_url.replace('http://', '').replace('https://', '').replace('/', '_')}_js_files.txt"
+        try:
+            with open(report_path, 'w') as f:
+                f.write("JavaScript Files Found:\n")
+                f.write("-" * 50 + "\n")
+                for js_file in sorted(self.js_files):
+                    f.write(f"{js_file}\n")
+            self.console.print_success(f"JavaScript files report saved to {report_path}")
+        except Exception as e:
+            self.console.print_error(f"Failed to write JS files report: {e}")

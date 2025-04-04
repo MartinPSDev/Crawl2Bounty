@@ -198,13 +198,20 @@ class AttackEngine:
         except: return url.rstrip('/')
 
     async def test_vulnerability(self, url: str, method: str = "GET", params=None, data=None, headers=None):
-        self.console.print_info(f"Testing vulnerabilities on {method} {url}")
+        self.console.print_info(f"Starting vulnerability test on {method} {url}")
         findings = []
         
         params = params or {}
         data = data or {}
         headers = headers or {}
         
+        # Detectar WAF primero
+        waf_info = await self.detect_waf(url, method)
+        if waf_info:
+            self.record_finding("waf_detection", "INFO", {
+                "waf": waf_info["waf"], "signature": waf_info["signature"]
+            }, url)
+
         # Función auxiliar para probar payloads
         async def test_payloads(payload_dict, vuln_type, verify_func):
             for category, payloads in payload_dict.items():
@@ -640,6 +647,32 @@ class AttackEngine:
                 }
         except Exception as e:
             self.console.print_warning(f"Error testing payload {payload}: {e}")
+        return None
+
+    async def detect_waf(self, url: str, method: str = "GET") -> Optional[Dict]:
+        self.console.print_info(f"Detecting WAF on {url}")
+        waf_signatures = {
+            "Cloudflare": ["cf-ray", "cloudflare", "__cfduid"],
+            "AWS WAF": ["aws-waf-token", "x-amzn-waf"],
+            "Imperva": ["x-iinfo", "incap_ses"],
+            "Sucuri": ["x-sucuri-id", "sucuri/cloudproxy"],
+            "F5 BIG-IP": ["bigipserver"]
+        }
+        test_headers = {"User-Agent": "' OR 1=1 --"}
+        response = await self._make_request(url, method, headers=test_headers, payload_info="WAF Detection")
+        if not response:
+            return None
+        headers = {k.lower(): v for k, v in response.headers.items()}
+        body = await response.text()
+        for waf, signatures in waf_signatures.items():
+            for sig in signatures:
+                if sig in headers or sig in body.lower():
+                    self.console.print_warning(f"WAF detected: {waf} (Signature: {sig})")
+                    return {"waf": waf, "signature": sig}
+        if response.status_code in [403, 429]:
+            self.console.print_warning(f"Possible WAF detected (Status: {response.status_code})")
+            return {"waf": "Unknown", "signature": f"Status {response.status_code}"}
+        self.console.print_debug("No WAF detected")
         return None
 
 
