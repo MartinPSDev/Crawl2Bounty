@@ -166,14 +166,14 @@ def display_banner(console: ConsoleManager):
     by @M4rt1n_0x1337
     Version 1.1.0 - Advanced Web Recognition
     """
-    console.print_info(f"[bold cyan]{banner}[/bold cyan]")  # Usar print_info en lugar de print
+    console.print_info(f"[bold cyan]{banner}[/bold cyan]")
 
 def validate_target_url(url: str) -> str:
     """Valida y normaliza la URL objetivo, añadiendo esquema si falta."""
     try:
         parsed = urlparse(url)
         if not parsed.scheme:
-            normalized_url = f"https://{url}"  # Por defecto usa HTTPS
+            normalized_url = f"https://{url}"
             logger.debug(f"Esquema añadido: {normalized_url}")
         else:
             normalized_url = url
@@ -292,8 +292,19 @@ def main():
     try:
         logger.debug("Instanciando componentes...")
         report_generator = ReportGenerator(console, domain_dir=domain_dir, report_format=args.output)
-        crawler = SmartCrawler(console, normalized_url, max_depth=args.depth, timeout=args.timeout, rate_limit=args.rate_limit,
-                               excluded_patterns=args.exclude, included_patterns=args.include, force=args.force, domain_dir=domain_dir)
+        # Ajustar la llamada a SmartCrawler para coincidir con su firma
+        crawler = SmartCrawler(
+            base_url=normalized_url,
+            max_depth=args.depth,
+            timeout=args.timeout,
+            rate_limit=args.rate_limit,
+            excluded_patterns=args.exclude,
+            included_patterns=args.include,
+            interactsh_url=args.interactsh_url,
+            report_generator=report_generator,
+            force=args.force,
+            domain_dir=domain_dir
+        )
         detector = SmartDetector(console)
         attack_engine = AttackEngine(console, detector, args.interactsh_url)
     except Exception as e:
