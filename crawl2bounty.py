@@ -328,7 +328,7 @@ def validate_depth(depth: int) -> bool:
     """Valida que la profundidad de rastreo esté dentro de los límites permitidos."""
     return MIN_DEPTH <= depth <= MAX_DEPTH
 
-async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine: AttackEngine, report_generator: ReportGenerator, save_screenshots: bool = False, save_responses: bool = False):
+async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine: AttackEngine, report_generator: ReportGenerator, save_screenshots: bool = False, save_responses: bool = False, output_format: str = 'txt'):
     """Ejecuta el escaneo completo."""
     try:
         # Iniciar el crawling
@@ -369,84 +369,17 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
                 continue
         
         # Generar reporte final
-        await report_generator.generate_report("reporte_final")
+        await report_generator.generate_report("reporte_final", output_format)
         
     except asyncio.CancelledError:
         logging.info("Escaneo interrumpido por el usuario")
         # Asegurar que se genere un reporte parcial
-        await report_generator.generate_report("reporte_parcial")
+        await report_generator.generate_report("reporte_parcial", output_format)
     except Exception as e:
         logging.error(f"Error durante el escaneo: {e}")
         # Asegurar que se genere un reporte parcial
-        await report_generator.generate_report("reporte_error")
+        await report_generator.generate_report("reporte_error", output_format)
         raise
-
-def parse_output_format(output_file: Optional[str]) -> str:
-    """Determina el formato del reporte basado en la extensión del archivo."""
-    if output_file:
-        _, ext = os.path.splitext(output_file)
-        if ext in [".txt", ".md", ".json"]:
-            return ext.lstrip(".")  # Retorna el formato sin el punto
-    return "txt"  # Formato predeterminado
-
-async def async_main(output_file, domain_dir, verbose):
-    loop = asyncio.get_running_loop()
-
-    # Determinar el formato del reporte
-    report_format = parse_output_format(output_file)
-
-    # Inicializa `ReportGenerator`
-    report_generator = ReportGenerator(
-        console_manager=console,
-        output_file=output_file,
-        domain_dir=domain_dir,
-        report_format=report_format  # Pasar el formato al generador
-    )
-
-    # Aquí puedes continuar con la lógica de escaneo
-    console.print_info("Iniciando el escaneo...")
-    report_generator.log_realtime_event("Evento registrado correctamente")
-
-    # Register signal handlers
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop, console)))
-
-    # Initialize components
-    crawler = SmartCrawler(
-        base_url=args.url,
-        max_depth=args.depth,
-        timeout=args.timeout,
-        rate_limit=args.rate_limit,
-        excluded_patterns=args.exclude,
-        included_patterns=args.include,
-        interactsh_url=args.interactsh_url,
-        report_generator=report_generator,
-        force=args.force,
-        domain_dir=domain_dir
-    )
-    detector = SmartDetector(console_manager=console)
-    attack_engine = AttackEngine(console_manager=console, smart_detector=detector, interactsh_url=args.interactsh_url)
-
-    try:
-        await run_scan(
-            crawler=crawler,
-            detector=detector,
-            attack_engine=attack_engine,
-            report_generator=report_generator,
-            save_screenshots=args.screenshots,
-            save_responses=args.responses
-        )
-    except asyncio.CancelledError:
-        console.print_warning("Main scan loop cancelled.")
-        # Generar reporte parcial en caso de interrupción
-        await report_generator.generate_report("reporte_parcial")
-    except Exception as e:
-        logger.error(f"Error durante el escaneo: {e}", exc_info=True)
-        console.print_error(f"Error durante el escaneo: {e}")
-        # Generar reporte de error
-        await report_generator.generate_report("reporte_error")
-    finally:
-        console.print_info("Escaneo finalizado.")
 
 def main():
     """Main function to run the web vulnerability scanner."""
@@ -460,11 +393,11 @@ def main():
     parser.add_argument('--screenshots', action='store_true', help='Save screenshots of pages')
     parser.add_argument('--responses', action='store_true', help='Save page responses')
     parser.add_argument('--interactsh-url', help='Interactsh URL for OOB testing')
-    parser.add_argument('--force', '-f', action='store_true', help='Force analysis of normally excluded domains (e.g., social networks)')
-    parser.add_argument('-o', '--output', help='Output file name for the report')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose mode for more detailed output')
-    parser.add_argument('-u', '--update', action='store_true', help='Update the tool from GitHub')
-
+    parser.add_argument('--force', '-f', action='store_true', help='Forzar el análisis de dominios normalmente excluidos (redes sociales, etc.)')
+    parser.add_argument('-o', '--output', choices=['txt', 'json', 'md'], default='txt', help='Formato del archivo de salida (txt, json, md)')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Modo verbose para mostrar más información')
+    parser.add_argument('-u', '--update', action='store_true', help='Actualizar la herramienta desde GitHub')
+    
     args = parser.parse_args()
 
     # Check for updates
@@ -491,9 +424,44 @@ def main():
     try:
         asyncio.run(async_main(
             output_file=args.output,
-            domain_dir=create_domain_directory(args.url),
-            verbose=args.verbose
+            domain_dir=domain_dir
+        )
+        crawler = SmartCrawler(
+            base_url=args.url,
+            max_depth=args.depth,
+            timeout=args.timeout,
+            rate_limit=args.rate_limit,
+            excluded_patterns=args.exclude,
+            included_patterns=args.include,
+            interactsh_url=args.interactsh_url,
+            report_generator=report_generator,
+            force=args.force,
+            domain_dir=domain_dir
+        )
+        detector = SmartDetector(console_manager=console)
+        attack_engine = AttackEngine(console_manager=console, smart_detector=detector, interactsh_url=args.interactsh_url)
+        
+        # Configurar manejador de señales
+        def signal_handler(signum, frame):
+            console.print_warning("\nSeñal de interrupción recibida. Finalizando escaneo...")
+            # Cancelar todas las tareas asíncronas
+            for task in asyncio.all_tasks():
+                task.cancel()
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+        # Ejecutar el escaneo
+        asyncio.run(run_scan(
+            crawler=crawler,
+            detector=detector,
+            attack_engine=attack_engine,
+            report_generator=report_generator,
+            save_screenshots=args.screenshots,
+            save_responses=args.responses,
+            output_format=args.output
         ))
+        
     except KeyboardInterrupt:
         console.print_warning("\nKeyboardInterrupt caught (might be during setup/shutdown).")
     except Exception as e:

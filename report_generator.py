@@ -156,104 +156,135 @@ async def run_scan(crawler, detector, attack_engine, report_generator, save_scre
                     if vuln_findings:
                         report_generator.add_findings("vulnerability_scan", vuln_findings)
                 
-                # Guardar capturas de pantalla si está habilitado
-                if save_screenshots:
-                    await crawler.save_screenshot(url)
-                
-                # Guardar respuestas si está habilitado
-                    await crawler.save_response(url)
-                    
-            except asyncio.CancelledError:
-                logging.info("Escaneo interrumpido por el usuario")
-                raise
-            except Exception as e:
-                logging.error(f"Error procesando URL {url}: {e}")
-                continue
-        
-        # Generar reporte final
-        await report_generator.generate_report("reporte_final")
-        
-    except asyncio.CancelledError:
-        logging.info("Escaneo interrumpido por el usuario")
-        # Asegurar que se genere un reporte parcial
-        await report_generator.generate_report("reporte_parcial")
-    except Exception as e:
-        logging.error(f"Error durante el escaneo: {e}")
-        # Asegurar que se genere un reporte parcial
-        await report_generator.generate_report("reporte_error")
-        raise
+                # Registrar finalización en logs
+                self.log_realtime_event("SCAN_COMPLETE", "Escaneo finalizado", {
+                    "duración_segundos": self.metadata["scan_duration_seconds"],
+                    "total_hallazgos": sum(len(findings) for findings in self.findings.values())
+                })
+        except Exception as e:
+            self.console.print_error(f"Error finalizando reporte: {e}")
 
-async def shutdown(sig, loop, console):
-    """Maneja el cierre del programa de forma elegante."""
-    console.print_warning(f"\nReceived exit signal {sig.name}...")
-    console.print_info("Attempting graceful shutdown, cancelling tasks...")
+    def generate_summary(self) -> dict:
+        """Generates a summary dictionary from all collected findings."""
+        summary = {
+            "total_findings": 0,
+            "by_severity": defaultdict(int),
+            "by_type": defaultdict(int),
+            "vulnerable_endpoints": set(),
+        }
 
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    if not tasks:
-        console.print_info("No pending tasks to cancel.")
-        return
+        all_findings_flat = [finding for section_findings in self.findings.values() for finding in section_findings]
+        summary["total_findings"] = len(all_findings_flat)
 
-    # Cancel all tasks
-    for task in tasks:
-        task.cancel()
+        for finding in all_findings_flat:
+            severity_key = finding.get("severity", "INFO").lower()
+            finding_type = finding.get("type", "unknown")
 
-    try:
-        # Wait for tasks to finish cancelling with a timeout
-        await asyncio.wait(tasks, timeout=5)
-    except asyncio.CancelledError:
-        console.print_warning("Some tasks did not finish in time.")
+            summary["by_severity"][severity_key] += 1
+            summary["by_type"][finding_type] += 1
 
-    # Forcefully close the loop if tasks are still pending
-    pending_tasks = [t for t in asyncio.all_tasks() if not t.done()]
-    if pending_tasks:
-        console.print_warning(f"Forcing shutdown. {len(pending_tasks)} tasks are still pending.")
-        for task in pending_tasks:
-            task.cancel()
-        loop.stop()
+            url = finding.get("url")
+            if url:
+                try:
+                    summary["vulnerable_endpoints"].add(urlparse(url)._replace(query="", fragment="").geturl())
+                except Exception:
+                    summary["vulnerable_endpoints"].add(url)
 
-    console.print_info("Shutdown complete.")
+        summary["vulnerable_endpoints"] = sorted(list(summary["vulnerable_endpoints"]))
+        return summary
 
-async def async_main(output_file: str, domain_dir: str, verbose: bool):
-    # Inicializa `console`
-    console = ConsoleManager(verbose=verbose)
+    def _determine_severity(self, finding: dict) -> str:
+        """Determines default severity based on finding type."""
+        finding_type = finding.get("type", "").lower()
 
-    # Inicializa `ReportGenerator`
-    report_generator = ReportGenerator(
-        console_manager=console,
-        output_file=output_file,
-        domain_dir=domain_dir
-    )
+        critical_types = [
+            "sql_injection", "command_injection", "ssti", "rce",
+            "deserialization", "authentication_bypass", "privilege_escalation",
+        ]
+        high_types = [
+            "xss_reflected", "xss_stored", "path_traversal", "forbidden_bypass", "ssrf",
+            "sensitive_data_exposure",
+            "js_dynamic_var_modification_error",
+        ]
+        medium_types = [
+            "xss_dom", "open_redirect", "csrf", "information_disclosure",
+            "directory_listing", "misconfiguration",
+            "js_static_potential_api_key", "js_static_potential_password", "js_static_authorization_header",
+            "traffic_sensitive_info",
+            "js_dynamic_suspicious_call_chain",
+            "js_dynamic_service_connection",
+        ]
+        low_types = [
+            "http_security_headers_missing", "verbose_error_message",
+            "software_version_disclosure",
+            "js_static_internal_url", "js_static_interesting_endpoint",
+            "traffic_internal_endpoint", "js_dynamic_active_single_char_var",
+            "js_static_eval_usage", "js_static_html_manipulation", "js_static_storage_access",
+            "js_static_sensitive_comment", "js_static_debug_flag",
+            "js_error_on_click",
+        ]
+        info_types = [
+            "network_request_on_click",
+        ]
 
-    # Aquí puedes continuar con la lógica de escaneo
-    console.print_info("Iniciando el escaneo...")
-    report_generator.log_realtime_event("Evento registrado correctamente")
+        for type_prefix in critical_types:
+            if finding_type.startswith(type_prefix): return "CRITICAL"
+        for type_prefix in high_types:
+            if finding_type.startswith(type_prefix): return "HIGH"
+        for type_prefix in medium_types:
+            if finding_type.startswith(type_prefix): return "MEDIUM"
+        for type_prefix in low_types:
+            if finding_type.startswith(type_prefix): return "LOW"
+        for type_prefix in info_types:
+            if finding_type.startswith(type_prefix): return "INFO"
 
-def some_function_that_returns_an_object():
-    """Devuelve un objeto simulado con un atributo 'content'."""
-    class MockObject:
-        content = "Este es el contenido del objeto"
-    return MockObject()
+        return "INFO"
 
-# Uso del objeto
-obj = some_function_that_returns_an_object()
+    def generate_report(self, filename_prefix: str, format: str = 'txt'):
+        """Genera el archivo de reporte en el formato especificado."""
+        self.finalize_report()
 
-# Verifica que el objeto tenga el atributo `content` antes de acceder a él
-if hasattr(obj, 'content'):
-    content = obj.content
-else:
-    logger.error("El objeto no tiene el atributo 'content'")
+        report_summary = self.generate_summary()
 
-try:
-    # Define valores predeterminados para los argumentos
-    output_file = "default_report"
-    domain_dir = "reports"
-    verbose = True
+        report_data = {
+            "metadata": self.metadata,
+            "summary": report_summary,
+            "findings": {section: findings_list for section, findings_list in self.findings.items() if findings_list}
+        }
 
-    # Pasa los argumentos a async_main
-    asyncio.run(async_main(output_file=output_file, domain_dir=domain_dir, verbose=verbose))
-except KeyboardInterrupt:
-    console.print_warning("\nKeyboardInterrupt caught (might be during setup/shutdown).")
-except Exception as e:
-    logger.error(f"Unhandled error in main execution: {e}", exc_info=True)
-    console.print_error(f"Fatal error: {e}")
-    sys.exit(1)
+        if format == 'json':
+            json_filename = f"{filename_prefix}.json"
+            try:
+                with open(json_filename, "w", encoding="utf-8") as f:
+                    json.dump(report_data, f, indent=2, ensure_ascii=False, default=str)
+                self.console.print_success(f"JSON report saved to: {json_filename}")
+            except TypeError as e:
+                self.console.print_error(f"Failed to serialize report data to JSON for {json_filename}: {e}")
+                self.console.print_warning("Attempting fallback JSON serialization...")
+                try:
+                    def fallback_serializer(obj):
+                        if isinstance(obj, (datetime, time.struct_time)): return str(obj)
+                        if isinstance(obj, bytes): return obj.decode('utf-8', errors='replace')
+                        return repr(obj)
+                    with open(json_filename + ".fallback", "w", encoding="utf-8") as f:
+                        json.dump(report_data, f, indent=2, ensure_ascii=False, default=fallback_serializer)
+                    self.console.print_success(f"Fallback JSON report saved to: {json_filename}.fallback")
+                except Exception as fallback_e:
+                    self.console.print_error(f"Fallback JSON serialization also failed: {fallback_e}")
+
+        elif format == 'md':
+            # Lógica para generar archivo Markdown
+            pass
+        else:  # Por defecto, generar en formato txt
+            txt_filename = os.path.join(self.domain_dir, f"{filename_prefix}.txt")
+            with open(txt_filename, "w", encoding="utf-8") as f:
+                f.write("Reporte\n")
+                f.write("========\n")
+                f.write(f"Metadata: {self.metadata}\n")
+                f.write(f"Resumen: {report_summary}\n")
+                f.write("Hallazgos:\n")
+                for section, findings in report_data['findings'].items():
+                    f.write(f"{section}:\n")
+                    for finding in findings:
+                        f.write(f"- {finding}\n")
+            self.console.print_success(f"TXT report saved to: {txt_filename}")
