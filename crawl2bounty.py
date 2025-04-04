@@ -19,6 +19,7 @@ import subprocess
 import requests
 from packaging import version
 import json
+import functools
 
 # Constantes de configuración
 MAX_DEPTH = 10  # Profundidad máxima recomendada
@@ -363,43 +364,71 @@ def main():
     parser.add_argument('--screenshots', action='store_true', help='Save screenshots of pages')
     parser.add_argument('--responses', action='store_true', help='Save page responses')
     parser.add_argument('--interactsh-url', help='Interactsh URL for OOB testing')
-    parser.add_argument('--force', '-f', action='store_true', help='Forzar el análisis de dominios normalmente excluidos (redes sociales, etc.)')
-    parser.add_argument('-o', '--output', help='Nombre del archivo de salida para el reporte')
-    parser.add_argument('-v', '--verbose', action='store_true', help='Modo verbose para mostrar más información')
-    parser.add_argument('-u', '--update', action='store_true', help='Actualizar la herramienta desde GitHub')
-    
+    parser.add_argument('--force', '-f', action='store_true', help='Force analysis of normally excluded domains (e.g., social networks)')
+    parser.add_argument('-o', '--output', help='Output file name for the report')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Verbose mode for more detailed output')
+    parser.add_argument('-u', '--update', action='store_true', help='Update the tool from GitHub')
+
     args = parser.parse_args()
-    
-    # Verificar si se solicitó actualización
+
+    # Check for updates
     if args.update:
         if update_tool():
             sys.exit(0)
         else:
             sys.exit(1)
-    
-    # Verificar si se proporcionó URL
+
+    # Validate URL
     if not args.url:
         parser.print_help()
         sys.exit(1)
-    
-    # Verificar actualizaciones disponibles
-    has_update, latest_version = check_for_updates()
-    if has_update:
-        console = ConsoleManager(verbose=True)
-        console.print_warning(f"Hay una nueva versión disponible: {latest_version}")
-        console.print_info("Ejecuta con el flag -u o --update para actualizar")
-    
-    # Crear directorio para el dominio
+
+    # Create domain directory
     domain_dir = create_domain_directory(args.url)
-    
-    # Configurar logging
+
+    # Configure logging
     logger = setup_logging(domain_dir, args.verbose)
-    
-    try:
-        # Inicializar componentes
-        console = ConsoleManager(verbose=args.verbose)
+
+    # Initialize console early
+    console = ConsoleManager(verbose=args.verbose)
+
+    # --- Define the async-aware signal handling logic ---
+    async def shutdown(sig, loop, console):
+        console.print_warning(f"\nReceived exit signal {sig.name}...")
+        console.print_info("Attempting graceful shutdown, cancelling tasks...")
+
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        if not tasks:
+            console.print_info("No pending tasks to cancel.")
+            return
+
+        # Cancel all tasks
+        for task in tasks:
+            task.cancel()
+
+        # Wait for tasks to finish cancelling
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        cancelled_count = 0
+        error_count = 0
+        for result in results:
+            if isinstance(result, asyncio.CancelledError):
+                cancelled_count += 1
+            elif isinstance(result, Exception):
+                error_count += 1
+                console.print_error(f"Error during task cleanup: {result}")
+
+        console.print_info(f"Tasks cancelled: {cancelled_count}, Errors during cleanup: {error_count}")
+
+    async def async_main():
+        loop = asyncio.get_running_loop()
+
+        # Register signal handlers
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop, console)))
+
+        # Initialize components
         report_generator = ReportGenerator(
-            console_manager=console, 
+            console_manager=console,
             output_file=args.output,
             domain_dir=domain_dir
         )
@@ -417,36 +446,33 @@ def main():
         )
         detector = SmartDetector(console_manager=console)
         attack_engine = AttackEngine(console_manager=console, smart_detector=detector, interactsh_url=args.interactsh_url)
-        
-        # Configurar manejador de señales
-        def signal_handler(signum, frame):
-            console.print_warning("\nSeñal de interrupción recibida. Finalizando escaneo...")
-            # Cancelar todas las tareas asíncronas
-            for task in asyncio.all_tasks():
-                task.cancel()
-        
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-        
-        # Ejecutar el escaneo
-        asyncio.run(run_scan(
-            crawler=crawler,
-            detector=detector,
-            attack_engine=attack_engine,
-            report_generator=report_generator,
-            save_screenshots=args.screenshots,
-            save_responses=args.responses
-        ))
-        
+
+        try:
+            await run_scan(
+                crawler=crawler,
+                detector=detector,
+                attack_engine=attack_engine,
+                report_generator=report_generator,
+                save_screenshots=args.screenshots,
+                save_responses=args.responses
+            )
+        except asyncio.CancelledError:
+            console.print_warning("Main scan loop cancelled.")
+        finally:
+            await attack_engine.close_client()
+            console.print_info("Scan process finished or interrupted.")
+
+    try:
+        asyncio.run(async_main())
     except KeyboardInterrupt:
-        console.print_warning("\nEscaneo interrumpido por el usuario")
-        sys.exit(0)
+        console.print_warning("\nKeyboardInterrupt caught (might be during setup/shutdown).")
     except Exception as e:
-        logging.error(f"Error during scan: {e}")
+        logger.error(f"Unhandled error in main execution: {e}", exc_info=True)
+        console.print_error(f"Fatal error: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
     if sys.version_info < (3, 7):
-        print("Crawl2Bounty requiere Python 3.7 o superior.", file=sys.stderr)
+        print("Crawl2Bounty requires Python 3.7 or higher.", file=sys.stderr)
         sys.exit(1)
     main()
