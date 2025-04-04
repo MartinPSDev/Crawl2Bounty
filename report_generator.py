@@ -139,6 +139,17 @@ class ReportGenerator:
                 for finding in findings:
                     await report_file.write(f"- {finding}\n")
 
+    async def save_js_urls(self, js_urls: List[str], domain: str):
+        """Guarda las URLs de archivos .js en un archivo de texto."""
+        try:
+            js_report_path = os.path.join(self.domain_dir, f"{domain}_js_urls.txt")
+            async with aiofiles.open(js_report_path, 'w') as js_file:
+                for js_url in js_urls:
+                    await js_file.write(f"{js_url}\n")
+            self.console.print_success(f"JavaScript URLs saved to: {js_report_path}")
+        except Exception as e:
+            self.console.print_error(f"Error saving JS URLs: {e}")
+
 async def run_scan(crawler, detector, attack_engine, report_generator, save_screenshots=False, save_responses=False):
     from site_crawler import SmartCrawler  # Importación dentro de la función
     """Ejecuta el escaneo completo."""

@@ -307,6 +307,7 @@ class SmartCrawler:
             self.console.print_debug("Gathering new links...")
             try:
                 if self.page:
+                    # Recolectar enlaces <a>
                     links = await self.page.query_selector_all('a[href]')
                     new_urls = []
                     for link in links:
@@ -316,11 +317,24 @@ class SmartCrawler:
                             if self.is_in_scope(full_url):
                                 new_urls.append(full_url)
                                 await self.add_to_crawl_queue(full_url, depth + 1)
-                    
+
+                    # Recolectar scripts <script src>
+                    scripts = await self.page.query_selector_all('script[src]')
+                    for script in scripts:
+                        src = await script.get_attribute('src')
+                        if src:
+                            full_script_url = urljoin(url, src)
+                            if self.is_in_scope(full_script_url) and full_script_url.endswith('.js'):
+                                self.console.print_debug(f"Found JavaScript file: {full_script_url}")
+                                new_urls.append(full_script_url)
+                                await self.add_to_crawl_queue(full_script_url, depth + 1)
+                                # Opcional: Analizar el contenido del archivo .js
+                                await self._analyze_js_file(full_script_url)
+
                     if self.report_generator:
                         self.report_generator.log_realtime_event("LINKS_FOUND", f"Enlaces encontrados en {url}", {
                             "total_links": len(new_urls),
-                            "new_urls": new_urls[:5]  # Limitamos a 5 URLs para el log
+                            "new_urls": new_urls[:5]
                         })
             except Exception as e:
                 self.console.print_error(f"Error recolectando enlaces: {e}")
@@ -575,74 +589,28 @@ class SmartCrawler:
     def is_in_scope(self, url: str) -> bool:
         """Verifica si la URL está dentro del alcance definido."""
         try:
-            # Obtener el dominio base del target
             target_domain = urlparse(self.base_url).netloc.lower()
-            
-            # Lista de dominios a excluir
-            excluded_domains = [
-                # Redes sociales
-                'facebook.com', 'fb.com', 'instagram.com', 'twitter.com', 'x.com',
-                'linkedin.com', 'youtube.com', 'tiktok.com', 'pinterest.com',
-                'reddit.com', 'snapchat.com', 'tumblr.com', 'flickr.com',
-                'vimeo.com', 'whatsapp.com', 'telegram.org', 'discord.com',
-                'twitch.tv', 'medium.com', 'github.com', 'gitlab.com',
-                
-                # Motores de búsqueda y servicios de Google
-                'google.com', 'google.co.uk', 'google.es', 'google.fr', 'google.de',
-                'google.it', 'google.jp', 'google.cn', 'google.ru', 'google.com.br',
-                'google.com.mx', 'google.ca', 'google.com.au', 'google.co.in',
-                'gmail.com', 'youtube.com', 'googlemaps.com', 'googleanalytics.com',
-                'googleapis.com', 'googleusercontent.com', 'gstatic.com',
-                
-                # Otros motores de búsqueda
-                'bing.com', 'yahoo.com', 'duckduckgo.com', 'baidu.com', 'yandex.ru',
-                'ask.com', 'aol.com', 'search.naver.com', 'search.daum.net',
-                
-                # Bots y rastreadores comunes
-                'bot', 'crawler', 'spider', 'slurp', 'baiduspider', 'yandexbot',
-                'bingbot', 'googlebot', 'sogou', 'duckduckbot', 'baiduspider',
-                'yisouspider', 'sosospider', '360spider', 'sogou', 'soso',
-                'ahrefsbot', 'mj12bot', 'semrushbot', 'dotbot', 'applebot',
-                'rogerbot', 'lighthouse', 'pagespeed', 'gtmetrix', 'pingdom',
-                'uptimerobot', 'monitor', 'crawler', 'spider', 'bot', 'slurp',
-                'baiduspider', 'yandexbot', 'bingbot', 'googlebot', 'sogou',
-                'duckduckbot', 'baiduspider', 'yisouspider', 'sosospider',
-                '360spider', 'sogou', 'soso', 'ahrefsbot', 'mj12bot', 'semrushbot',
-                'dotbot', 'applebot', 'rogerbot', 'lighthouse', 'pagespeed',
-                'gtmetrix', 'pingdom', 'uptimerobot', 'monitor'
-            ]
-            
-            # Parsear la URL a verificar
             parsed_url = urlparse(url)
             url_domain = parsed_url.netloc.lower()
             
-            # Verificar si el dominio está en la lista de exclusión (solo si no está forzado)
-            if not self.force and any(excluded in url_domain for excluded in excluded_domains):
-                self.console.print_debug(f"URL de dominio excluido: {url}")
-                return False
-            
-            # Verificar si el dominio coincide con el target
-            if target_domain not in url_domain:
+            # Permitir archivos .js del dominio objetivo o subdominios
+            if not url_domain.endswith(target_domain) and target_domain not in url_domain:
                 self.console.print_debug(f"URL fuera de scope excluida: {url}")
                 return False
             
-            # Verificar patrones de exclusión si existen
+            # Excluir patrones si existen
             if self.excluded_patterns:
                 for pattern in self.excluded_patterns:
                     if re.search(pattern, url, re.IGNORECASE):
                         self.console.print_debug(f"URL coincidente con patrón de exclusión: {url}")
                         return False
             
-            # Verificar patrones de inclusión si existen
-            if self.included_patterns:
-                for pattern in self.included_patterns:
-                    if re.search(pattern, url, re.IGNORECASE):
-                        self.console.print_debug(f"URL coincidente con patrón de inclusión: {url}")
-                        return True
-                return False
+            # Incluir explícitamente archivos .js
+            if url.endswith('.js'):
+                self.console.print_debug(f"URL .js incluida: {url}")
+                return True
             
             return True
-            
         except Exception as e:
             self.console.print_error(f"Error verificando scope de URL {url}: {e}")
             return False
@@ -1369,3 +1337,28 @@ class SmartCrawler:
             
         except Exception as e:
             self.console.print_warning(f"Error simulating human behavior: {str(e)}")
+
+    async def _analyze_js_file(self, js_url: str):
+        """Descarga y analiza un archivo JavaScript."""
+        try:
+            # Hacer una solicitud directa al archivo .js
+            response = await self.page.context.request.get(js_url)
+            js_content = await response.text()
+            self.console.print_debug(f"Analyzing JavaScript file: {js_url}")
+            
+            # Usar SmartDetector para analizar el contenido
+            js_findings = await self.detector.analyze_js(js_content)
+            if self.report_generator and js_findings:
+                self.report_generator.add_findings("javascript_analysis", js_findings)
+                self.console.print_debug(f"JS findings from {js_url}: {len(js_findings)}")
+            
+            # Opcional: Buscar URLs embebidas en el JS
+            url_pattern = r'(https?://[^\s"\']+)'
+            embedded_urls = re.findall(url_pattern, js_content)
+            for embedded_url in embedded_urls:
+                if self.is_in_scope(embedded_url):
+                    await self.add_to_crawl_queue(embedded_url, depth + 1)
+                    self.console.print_debug(f"Found embedded URL in JS: {embedded_url}")
+                
+        except Exception as e:
+            self.console.print_error(f"Error analyzing JS file {js_url}: {e}")
