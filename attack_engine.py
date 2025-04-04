@@ -199,6 +199,7 @@ class AttackEngine:
 
     async def test_vulnerability(self, url: str, method: str = "GET", params: Optional[dict] = None, data: Optional[dict] = None):
         """Main function to test multiple vulnerabilities on an endpoint/params."""
+        self.console.print_info(f"Starting vulnerability test on {method} {url}")
         params = params or {}
         data = data or {}
         target_fields = list(params.keys()) + list(data.keys())

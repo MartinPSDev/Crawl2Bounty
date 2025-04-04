@@ -249,9 +249,11 @@ class SmartCrawler:
                 params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
                 if params:
                     vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params)
-                    if self.report_generator and vuln_findings:
-                        self.report_generator.add_findings("vulnerability_scan", vuln_findings)
-                        self.console.print_debug(f"Vulnerability findings added to report: {len(vuln_findings)}")
+                else:
+                    self.console.print_debug(f"No params found, testing basic vulnerabilities on {url}")
+                    vuln_findings = await self.attack_engine.test_vulnerability(url, "GET")  # Prueba sin params
+                if self.report_generator and vuln_findings:
+                    self.report_generator.add_findings("vulnerability_scan", vuln_findings)
             except Exception as e:
                 self.console.print_error(f"Error en verificación de vulnerabilidades: {e}")
             
@@ -449,7 +451,11 @@ class SmartCrawler:
             except Exception as e: self.console.print_warning(f"Error handling search with selector '{selector}': {e}")
 
     async def handle_interactive_elements(self, page: Page, base_url: str, depth: int):
-        """Handles interactive elements like buttons, links, and dropdowns."""
+        self.interaction_counts.setdefault(base_url, 0)
+        if self.interaction_counts[base_url] >= 5:  # Límite de 5 interacciones por URL
+            self.console.print_debug(f"Límite de interacciones alcanzado para {base_url}")
+            return
+
         self.console.print_debug("Handling interactive elements...")
         
         # Handle buttons and clickable elements
@@ -544,6 +550,8 @@ class SmartCrawler:
                             self.console.print_warning(f"Error handling select option: {e}")
         except Exception as e:
             self.console.print_warning(f"Error handling select elements: {e}")
+
+        self.interaction_counts[base_url] += 1  # Incrementar el contador de interacciones
 
     async def add_to_crawl_queue(self, url: str, depth: int):
         """Add a URL to the crawl queue if it's in scope and not already visited."""
@@ -640,27 +648,11 @@ class SmartCrawler:
             return False
 
     def _normalize_url(self, url: str) -> str:
-        """Normalize a URL by removing fragments and query parameters."""
-        try:
-            # Parse URL
-            parsed = urlparse(url)
-            
-            # Remove fragments and query parameters
-            normalized = parsed._replace(
-                fragment='',
-                query='',
-                params=''
-            ).geturl()
-            
-            # Remove trailing slash
-            if normalized.endswith('/'):
-                normalized = normalized[:-1]
-                
-            return normalized
-            
-        except Exception as e:
-            self.console.print_warning(f"Error normalizing URL {url}: {e}")
-            return url
+        parsed = urlparse(url)
+        normalized = parsed._replace(fragment='').geturl()  # Mantén query y params
+        if normalized.endswith('/'):
+            normalized = normalized[:-1]
+        return normalized
 
     async def get_next_search_term(self) -> Optional[str]:
         """Get the next search term from the SmartDetector."""
