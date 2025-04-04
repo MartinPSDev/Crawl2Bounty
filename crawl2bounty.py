@@ -129,11 +129,14 @@ def update_tool():
 def create_domain_directory(url: str) -> str:
     """Crea un directorio para el dominio y retorna su ruta."""
     try:
-        domain = urlparse(url).netloc.lower()
+        # Extraer dominio incluso si no hay esquema
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower() if parsed.netloc else url.split('/')[0].lower()
         domain_dir = os.path.join('reports', domain)
         os.makedirs(os.path.join(domain_dir, 'logs'), exist_ok=True)
         os.makedirs(os.path.join(domain_dir, 'screenshots'), exist_ok=True)
         os.makedirs(os.path.join(domain_dir, 'responses'), exist_ok=True)
+        logger.debug(f"Directorio creado: {domain_dir}")
         return domain_dir
     except Exception as e:
         logger.error(f"Error creando directorio para el dominio: {e}")
@@ -151,6 +154,7 @@ def setup_logging(domain_dir: str, verbose: bool = False):
     logging.getLogger('playwright').setLevel(logging.WARNING)
     logging.getLogger('httpx').setLevel(logging.WARNING)
     logger.setLevel(log_level)
+    logger.debug("Logging configurado")
 
 def display_banner(console: ConsoleManager):
     """Muestra el banner de la aplicación."""
@@ -166,25 +170,43 @@ def display_banner(console: ConsoleManager):
     """
     console.print(f"[bold cyan]{banner}[/bold cyan]\n", highlight=False)
 
-def validate_target_url(url: str) -> bool:
-    """Valida que la URL objetivo sea válida."""
+def validate_target_url(url: str) -> str:
+    """Valida y normaliza la URL objetivo, añadiendo esquema si falta."""
     try:
         parsed = urlparse(url)
-        return bool(parsed.scheme and parsed.netloc)
-    except Exception:
-        return False
+        if not parsed.scheme:
+            normalized_url = f"https://{url}"  # Por defecto usa HTTPS
+            logger.debug(f"Esquema añadido: {normalized_url}")
+            parsed = urlparse(normalized_url)
+        else:
+            normalized_url = url
+        if not parsed.netloc:
+            logger.error(f"URL inválida: {url} - No se detectó dominio válido")
+            return ""
+        logger.debug(f"URL validada: {normalized_url}")
+        return normalized_url
+    except Exception as e:
+        logger.error(f"Error validando URL {url}: {e}")
+        return ""
 
 def validate_depth(depth: int) -> bool:
     """Valida que la profundidad de rastreo esté dentro de los límites permitidos."""
-    return MIN_DEPTH <= depth <= MAX_DEPTH
+    if MIN_DEPTH <= depth <= MAX_DEPTH:
+        logger.debug(f"Profundidad validada: {depth}")
+        return True
+    logger.error(f"Profundidad {depth} fuera de límites ({MIN_DEPTH}-{MAX_DEPTH})")
+    return False
 
 async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine: AttackEngine, report_generator: ReportGenerator, save_screenshots: bool = False, save_responses: bool = False, output_format: str = 'txt'):
     """Ejecuta el escaneo completo."""
     try:
+        logger.info(f"Iniciando escaneo en {crawler.base_url}")
         await crawler.start_crawl(crawler.base_url)
+        logger.debug(f"URLs visitadas: {len(crawler.visited_urls)}")
         for url in crawler.visited_urls:
             try:
-                async with asyncio.timeout(60):  # Timeout por URL
+                async with asyncio.timeout(60):
+                    logger.debug(f"Procesando URL: {url}")
                     js_findings = await detector.analyze_js(url)
                     if js_findings:
                         report_generator.add_findings("javascript_analysis", js_findings)
@@ -192,7 +214,7 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
                     if dynamic_findings:
                         report_generator.add_findings("dynamic_analysis", dynamic_findings)
                     if attack_engine.interactsh_url:
-                        vuln_findings = await attack_engine.test_vulnerability(url)  # Ajustado a test_vulnerability
+                        vuln_findings = await attack_engine.test_vulnerability(url)
                         if vuln_findings:
                             report_generator.add_findings("vulnerability_scan", vuln_findings)
                     if save_screenshots:
@@ -203,7 +225,9 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
                 logger.error(f"Timeout procesando URL {url}")
             except Exception as e:
                 logger.error(f"Error procesando URL {url}: {e}")
-        await report_generator.generate_report(f"report_final_{urlparse(crawler.base_url).netloc}")
+        filename = f"report_final_{urlparse(crawler.base_url).netloc}"
+        logger.debug(f"Generando reporte: {filename}")
+        await report_generator.generate_report(filename)
     except asyncio.CancelledError:
         logger.info("Escaneo interrumpido por el usuario")
         await report_generator.generate_report(f"report_partial_{urlparse(crawler.base_url).netloc}")
@@ -215,10 +239,11 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
 async def shutdown(signal: signal.Signals, loop: asyncio.AbstractEventLoop, console: ConsoleManager, attack_engine: AttackEngine):
     """Cierra todas las tareas y recursos al recibir una señal."""
     console.print_warning(f"\nRecibida señal {signal.name}. Cerrando...")
+    logger.info(f"Cerrando por señal: {signal.name}")
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     for task in tasks:
         task.cancel()
-    await attack_engine.close_client()  # Cerrar cliente HTTP
+    await attack_engine.close_client()
     await asyncio.gather(*tasks, return_exceptions=True)
     loop.stop()
 
@@ -240,41 +265,63 @@ def main():
     parser.add_argument('-u', '--update', action='store_true', help='Actualizar desde GitHub')
 
     args = parser.parse_args()
+    logger.debug(f"Argumentos recibidos: {vars(args)}")
 
     if args.update:
         sys.exit(0 if update_tool() else 1)
 
-    if not args.url or not validate_target_url(args.url):
+    if not args.url:
+        logger.error("No se proporcionó URL")
+        parser.print_help()
+        sys.exit(1)
+
+    normalized_url = validate_target_url(args.url)
+    if not normalized_url:
+        logger.error(f"URL inválida: {args.url}")
         parser.print_help()
         sys.exit(1)
 
     if not validate_depth(args.depth):
-        logger.error(f"Profundidad {args.depth} fuera de límites ({MIN_DEPTH}-{MAX_DEPTH})")
+        logger.error(f"Profundidad inválida: {args.depth}")
+        parser.print_help()
         sys.exit(1)
 
     console = ConsoleManager(verbose=args.verbose)
     display_banner(console)
-    domain_dir = create_domain_directory(args.url)
+    domain_dir = create_domain_directory(normalized_url)
     setup_logging(domain_dir, args.verbose)
 
-    report_generator = ReportGenerator(console, domain_dir=domain_dir, report_format=args.output)
-    crawler = SmartCrawler(console, args.url, max_depth=args.depth, timeout=args.timeout, rate_limit=args.rate_limit,
-                           excluded_patterns=args.exclude, included_patterns=args.include, force=args.force, domain_dir=domain_dir)
-    detector = SmartDetector(console)
-    attack_engine = AttackEngine(console, detector, args.interactsh_url)
+    try:
+        logger.debug("Instanciando componentes...")
+        report_generator = ReportGenerator(console, domain_dir=domain_dir, report_format=args.output)
+        crawler = SmartCrawler(console, normalized_url, max_depth=args.depth, timeout=args.timeout, rate_limit=args.rate_limit,
+                               excluded_patterns=args.exclude, included_patterns=args.include, force=args.force, domain_dir=domain_dir)
+        detector = SmartDetector(console)
+        attack_engine = AttackEngine(console, detector, args.interactsh_url)
+    except Exception as e:
+        logger.error(f"Error al instanciar componentes: {e}")
+        console.print_error(f"Fatal error al inicializar: {e}", fatal=True)
+        sys.exit(1)
 
     loop = asyncio.get_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop, console, attack_engine)))
 
     try:
+        logger.debug("Ejecutando escaneo...")
         loop.run_until_complete(run_scan(crawler, detector, attack_engine, report_generator, args.screenshots, args.responses, args.output))
     except KeyboardInterrupt:
-        pass  # Manejo por shutdown
+        logger.debug("Interrupción por usuario")
+    except Exception as e:
+        logger.error(f"Error en ejecución del escaneo: {e}")
+        console.print_error(f"Fatal error durante el escaneo: {e}", fatal=True)
+        sys.exit(1)
     finally:
-        loop.run_until_complete(attack_engine.close_client())  # Asegurar cierre del cliente
+        logger.debug("Cerrando recursos...")
+        loop.run_until_complete(attack_engine.close_client())
         loop.run_until_complete(loop.shutdown_asyncgens())
         loop.close()
+        logger.info("Programa finalizado")
 
 if __name__ == "__main__":
     if sys.version_info < (3, 7):
