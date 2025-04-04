@@ -603,4 +603,10 @@ class AttackEngine:
         """Returns the list of findings collected by the engine."""
         return self.findings
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close_client()
+
 

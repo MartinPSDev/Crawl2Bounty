@@ -31,7 +31,7 @@ class AdvancedJSAnalyzer:
 
         # Working Directory Setup
         self.working_dir: Optional[Path] = None
-        potential_dirs = [Path('/tmp/robot-hunter'), Path.home() / '.robot-hunter-advjs']
+        potential_dirs = [Path('/tmp/crawl2bounty'), Path.home() / '.crawl2bounty-advjs']
         for p_dir in potential_dirs:
             try:
                 p_dir.mkdir(parents=True, exist_ok=True)
