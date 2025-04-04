@@ -226,16 +226,14 @@ class SmartCrawler:
                 self.console.print_error(f"Error en análisis JS: {e}")
             
             # Basic vulnerability checks
-            self.console.print_debug("Performing basic vulnerability checks...")
+            self.console.print_debug("Performing vulnerability checks...")
             try:
                 parsed_url = urlparse(url)
                 params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
-                
-                # Llamar a test_vulnerability siempre, pasando params=None si no hay parámetros
-                vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params if params else None)
+                vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params)
                 if self.report_generator and vuln_findings:
                     self.report_generator.add_findings("vulnerability_scan", vuln_findings)
-                    self.console.print_debug(f"Vulnerability findings added to report: {len(vuln_findings)}")
+                    self.console.print_debug(f"Vulnerability findings added: {len(vuln_findings)}")
             except Exception as e:
                 self.console.print_error(f"Error en verificación de vulnerabilidades: {e}")
             

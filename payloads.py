@@ -474,38 +474,87 @@ OOB_PAYLOADS = {
 
 # Add other categories as needed: SSRF, Header Injection, NoSQL Injection, LFI specific variations etc.
 
-async def test_xss(self, url, method, base_params, base_data, field):
-    vuln_type = "XSS"
-    test_key = self._get_test_key(method, url, field, vuln_type)
-
-    if self._was_tested(test_key):
-        return
-    self._mark_tested(test_key)
-
-    # Probar payloads de XSS
-    for category, payloads in XSS_PAYLOADS.items():
-        if isinstance(payloads, dict):  # Permitir iterar sobre subcategorías
-            for subcategory, sub_payloads in payloads.items():
-                for payload_template in sub_payloads:
-                    # Ejecutar pruebas con cada payload
-                    await run_check(category, sub_payloads, self._verify_xss_reflection, f"XSS {subcategory} Check")
-        else:
-            for payload_template in payloads:
-                # Ejecutar pruebas con cada payload
-                await run_check(category, payloads, self._verify_xss_reflection, f"XSS Check")
-
-async def test_ssti(self, url, method, base_params, base_data, field):
-    vuln_type = "SSTI"
-    test_key = self._get_test_key(method, url, field, vuln_type)
-
-    if self._was_tested(test_key):
-        return
-    self._mark_tested(test_key)
-
-    # Probar payloads de SSTI
-    if await run_check("detection", SSTI_PAYLOADS['code_execution']['jinja2'], self._verify_ssti_calc, f"Calculation Result"):
-        return
+async def test_vulnerability(self, url: str, method: str = "GET", params=None, data=None, headers=None):
+    self.console.print_info(f"Testing vulnerabilities on {method} {url}")
+    findings = []
+    
+    params = params or {}
+    data = data or {}
+    headers = headers or {}
+    
+    # Función auxiliar para probar payloads
+    async def test_payloads(payload_dict, vuln_type, verify_func):
+        for category, payloads in payload_dict.items():
+            if isinstance(payloads, dict):
+                for subcat, sub_payloads in payloads.items():
+                    for payload in sub_payloads:
+                        self.console.print_debug(f"Testing {vuln_type}-{category}-{subcat}: {payload}")
+                        finding = await self._test_single_payload(url, method, payload, params, data, headers, verify_func)
+                        if finding:
+                            findings.append(finding)
+            else:
+                for payload in payloads:
+                    self.console.print_debug(f"Testing {vuln_type}-{category}: {payload}")
+                    finding = await self._test_single_payload(url, method, payload, params, data, headers, verify_func)
+                    if finding:
+                        findings.append(finding)
+    
+    # Probar todas las categorías, incluso sin params/data
+    await test_payloads(SQLI_PAYLOADS, "SQLi", self._verify_sqli_error)
+    await test_payloads(XSS_PAYLOADS, "XSS", self._verify_xss_reflection)
+    await test_payloads(CMD_PAYLOADS, "CMDi", self._verify_cmdi_time)
+    await test_payloads(SSTI_PAYLOADS, "SSTI", self._verify_ssti_calc)
+    await test_payloads(PATH_TRAVERSAL_PAYLOADS, "PathTraversal", self._verify_path_traversal)
     if self.interactsh_url:
-        for framework, payloads in SSTI_PAYLOADS['code_execution'].items():
-            if await run_check("oob", payloads, self._verify_oob, "OOB Interaction"):
-                return
+        await test_payloads(OOB_PAYLOADS, "OOB", self._verify_oob)
+    
+    # Añadir pruebas en cabeceras
+    header_findings = await self.test_headers(url, method)
+    findings.extend(header_findings)
+    
+    if findings:
+        self.console.print_success(f"Found {len(findings)} vulnerabilities on {url}")
+    else:
+        self.console.print_debug(f"No vulnerabilities found on {url}")
+    return findings
+
+async def test_headers(self, url: str, method: str = "GET"):
+    self.console.print_info(f"Testing headers on {method} {url}")
+    findings = []
+    
+    headers_to_test = [
+        "User-Agent", "Referer", "X-Forwarded-For", "Accept", "Content-Type",
+        "Origin", "Cookie", "X-Requested-With", "X-Custom-Header"
+    ]
+    
+    # Usar payloads variados de todas las categorías
+    all_payloads = {
+        "SQLi": SQLI_PAYLOADS["error_based"] + SQLI_PAYLOADS["waf_evasion"],
+        "XSS": XSS_PAYLOADS["attribute_injection"] + XSS_PAYLOADS["filter_evasion"],
+        "CMDi": CMD_PAYLOADS["blind_time"],
+        "PathTraversal": PATH_TRAVERSAL_PAYLOADS["encoding_bypass"]
+    }
+    
+    for header in headers_to_test:
+        for vuln_type, payloads in all_payloads.items():
+            for payload in payloads:
+                test_headers = {header: payload}
+                self.console.print_debug(f"Testing header {header} with {vuln_type}: {payload}")
+                try:
+                    response = await self._make_request(url, method, headers=test_headers)
+                    if response.status >= 500:
+                        findings.append({
+                            "type": "header_injection",
+                            "url": url,
+                            "header": header,
+                            "payload": payload,
+                            "status": response.status,
+                            "details": f"Server error detected (Len: {len(await response.text())})"
+                        })
+                        self.console.print_success(f"Server error {response.status} on {header}: {payload}")
+                    elif response.status in [403, 429]:
+                        self.console.print_warning(f"Possible WAF block on {header}: {payload} (Status: {response.status})")
+                except Exception as e:
+                    self.console.print_warning(f"Error testing header {header} with {payload}: {e}")
+    
+    return findings
