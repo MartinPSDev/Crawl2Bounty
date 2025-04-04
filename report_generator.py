@@ -161,8 +161,10 @@ async def run_scan(crawler, detector, attack_engine, report_generator, save_scre
                     "duración_segundos": self.metadata["scan_duration_seconds"],
                     "total_hallazgos": sum(len(findings) for findings in self.findings.values())
                 })
-        except Exception as e:
-            self.console.print_error(f"Error finalizando reporte: {e}")
+            except Exception as e:
+                self.console.print_error(f"Error finalizando reporte: {e}")
+    except Exception as e:
+        self.console.print_error(f"Error finalizando reporte: {e}")
 
     def generate_summary(self) -> dict:
         """Generates a summary dictionary from all collected findings."""
@@ -288,3 +290,7 @@ async def run_scan(crawler, detector, attack_engine, report_generator, save_scre
                     for finding in findings:
                         f.write(f"- {finding}\n")
             self.console.print_success(f"TXT report saved to: {txt_filename}")
+
+def main():
+    # Lógica de tu aplicación
+    pass  # Aquí va tu código

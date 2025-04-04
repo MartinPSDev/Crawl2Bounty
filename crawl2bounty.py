@@ -425,7 +425,7 @@ def main():
         asyncio.run(async_main(
             output_file=args.output,
             domain_dir=domain_dir
-        )
+        ))
         crawler = SmartCrawler(
             base_url=args.url,
             max_depth=args.depth,
