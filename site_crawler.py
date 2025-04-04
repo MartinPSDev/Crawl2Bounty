@@ -117,13 +117,17 @@ class SmartCrawler:
             """)
             
             # Iniciar el crawling
+            max_queue_size = 100  # Límite de URLs en la cola
             await self.add_to_crawl_queue(start_url, 0)
             
-            while not self.crawl_queue.empty():
+            while not self.crawl_queue.empty() and self.crawl_queue.qsize() <= max_queue_size:
                 url, depth = await self.crawl_queue.get()
                 if url not in self.visited_urls and depth <= self.max_depth:
                     self.visited_urls.add(url)
                     await self._process_single_url(url, depth)
+            
+            if self.crawl_queue.qsize() > max_queue_size:
+                self.console.print_warning(f"Queue size exceeded limit ({max_queue_size}), stopping crawl")
             
         except Exception as e:
             self.console.print_error(f"Error during crawl: {e}")
@@ -247,13 +251,12 @@ class SmartCrawler:
             try:
                 parsed_url = urlparse(url)
                 params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
-                if params:
-                    vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params)
-                else:
-                    self.console.print_debug(f"No params found, testing basic vulnerabilities on {url}")
-                    vuln_findings = await self.attack_engine.test_vulnerability(url, "GET")  # Prueba sin params
+                
+                # Llamar a test_vulnerability siempre, pasando params=None si no hay parámetros
+                vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params if params else None)
                 if self.report_generator and vuln_findings:
                     self.report_generator.add_findings("vulnerability_scan", vuln_findings)
+                    self.console.print_debug(f"Vulnerability findings added to report: {len(vuln_findings)}")
             except Exception as e:
                 self.console.print_error(f"Error en verificación de vulnerabilidades: {e}")
             
@@ -271,11 +274,10 @@ class SmartCrawler:
             # Handle interactive elements
             self.console.print_debug("Handling interactive elements...")
             try:
-                if self.page:
-                    interactive_findings = await self.handle_interactive_elements(self.page, url, depth)
-                    if self.report_generator and interactive_findings:
-                        self.report_generator.add_findings("interactive_elements", interactive_findings)
-                        self.console.print_debug(f"Interactive findings added to report: {len(interactive_findings)}")
+                findings = await self.handle_interactive_elements(self.page, url, depth)
+                if self.report_generator and findings:
+                    self.report_generator.add_findings("interactive_elements", findings)
+                    self.console.print_debug(f"Interactive findings added to report: {len(findings)}")
             except Exception as e:
                 self.console.print_error(f"Error manejando elementos interactivos: {e}")
             
@@ -465,14 +467,14 @@ class SmartCrawler:
             except Exception as e: self.console.print_warning(f"Error handling search with selector '{selector}': {e}")
 
     async def handle_interactive_elements(self, page: Page, base_url: str, depth: int):
+        self.console.print_debug("Handling interactive elements...")
+        
+        # Contador de interacciones por URL
         self.interaction_counts.setdefault(base_url, 0)
         if self.interaction_counts[base_url] >= 5:  # Límite de 5 interacciones por URL
             self.console.print_debug(f"Límite de interacciones alcanzado para {base_url}")
             return
-
-        self.console.print_debug("Handling interactive elements...")
         
-        # Handle buttons and clickable elements
         clickable_selectors = [
             'button:not([disabled])',
             'input[type="button"]:not([disabled])',
@@ -485,87 +487,40 @@ class SmartCrawler:
             '[data-target]'
         ]
         
+        findings = []
         for selector in clickable_selectors:
             try:
                 elements = await page.query_selector_all(selector)
                 for element in elements:
-                    if await element.is_visible():
-                        # Get element attributes for logging
+                    if await element.is_visible() and self.interaction_counts[base_url] < 5:
                         element_type = await element.evaluate('el => el.tagName.toLowerCase()')
                         element_id = await element.get_attribute('id') or ''
-                        element_class = await element.get_attribute('class') or ''
                         element_text = await element.inner_text() or ''
+                        self.console.print_debug(f"Interacting with {element_type} {element_id} '{element_text}'")
                         
-                        self.console.print_debug(f"Found interactive element: {element_type} {element_id} {element_class} {element_text}")
+                        # Llamada directa a test_vulnerability antes de hacer clic
+                        href = await element.get_attribute('href')
+                        if href:
+                            full_url = urljoin(base_url, href)
+                            if self.is_in_scope(full_url):
+                                await self.attack_engine.test_vulnerability(full_url, "GET")  # Forzar prueba de vulnerabilidad
+                                await self.add_to_crawl_queue(full_url, depth + 1)
                         
-                        # Check if element is in a form
-                        form_element = await element.query_selector('xpath=ancestor::form')
-                        if form_element:
-                            # Handle form submission
-                            await self.handle_form_submission(page, form_element, base_url, depth)
-                        else:
-                            # Handle standalone interactive elements
-                            try:
-                                # Get element's href or action
-                                href = await element.get_attribute('href')
-                                if href:
-                                    # Normalize URL
-                                    full_url = urljoin(base_url, href)
-                                    if self.is_in_scope(full_url):
-                                        # Test vulnerability on URL parameters
-                                        parsed_url = urlparse(full_url)
-                                        params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
-                                        if params:
-                                            await self.attack_engine.test_vulnerability(full_url, "GET", params=params)
-                                        
-                                        # Add to crawl queue
-                                        await self.add_to_crawl_queue(full_url, depth + 1)
-                                
-                                # Click element and handle navigation
-                                async with page.expect_navigation(wait_until="domcontentloaded", timeout=self.timeout // 2):
-                                    await element.click(timeout=5000)
-                                await page.wait_for_load_state("load", timeout=self.timeout // 2)
-                                
-                                # Test new page for vulnerabilities
-                                current_url = page.url
-                                if self.is_in_scope(current_url):
-                                    parsed_url = urlparse(current_url)
-                                    params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
-                                    if params:
-                                        await self.attack_engine.test_vulnerability(current_url, "GET", params=params)
-                                    
-                                    await self.add_to_crawl_queue(current_url, depth + 1)
-                                
-                            except Exception as e:
-                                self.console.print_warning(f"Error handling {element_type}: {e}")
-                                
+                        try:
+                            async with page.expect_navigation(wait_until="domcontentloaded", timeout=5000):
+                                await element.click(timeout=5000)
+                            await page.wait_for_load_state("load", timeout=self.timeout // 2)
+                            current_url = page.url
+                            if self.is_in_scope(current_url):
+                                await self.attack_engine.test_vulnerability(current_url, "GET")  # Forzar prueba de vulnerabilidad
+                                await self.add_to_crawl_queue(current_url, depth + 1)
+                            self.interaction_counts[base_url] += 1
+                        except Exception as e:
+                            self.console.print_warning(f"Error clicking {element_type}: {e}")
             except Exception as e:
                 self.console.print_warning(f"Error handling selector '{selector}': {e}")
         
-        # Handle dropdowns and select elements
-        try:
-            select_elements = await page.query_selector_all('select:not([disabled])')
-            for select in select_elements:
-                if await select.is_visible():
-                    # Get all options
-                    options = await select.query_selector_all('option')
-                    for option in options:
-                        try:
-                            # Select option and handle change event
-                            await select.select_option(value=await option.get_attribute('value'))
-                            await asyncio.sleep(0.2)
-                            
-                            # Test for form submission if in a form
-                            form_element = await select.query_selector('xpath=ancestor::form')
-                            if form_element:
-                                await self.handle_form_submission(page, form_element, base_url, depth)
-                            
-                        except Exception as e:
-                            self.console.print_warning(f"Error handling select option: {e}")
-        except Exception as e:
-            self.console.print_warning(f"Error handling select elements: {e}")
-
-        self.interaction_counts[base_url] += 1  # Incrementar el contador de interacciones
+        return findings
 
     async def add_to_crawl_queue(self, url: str, depth: int):
         """Add a URL to the crawl queue if it's in scope and not already visited."""
@@ -616,11 +571,15 @@ class SmartCrawler:
             return False
 
     def _normalize_url(self, url: str) -> str:
-        parsed = urlparse(url)
-        normalized = parsed._replace(fragment='').geturl()  # Mantén query y params
-        if normalized.endswith('/'):
-            normalized = normalized[:-1]
-        return normalized
+        try:
+            parsed = urlparse(url)
+            normalized = parsed._replace(fragment='').geturl()  # Mantén query y params
+            if normalized.endswith('/'):
+                normalized = normalized[:-1]
+            return normalized
+        except Exception as e:
+            self.console.print_warning(f"Error normalizing URL {url}: {e}")
+            return url
 
     async def get_next_search_term(self) -> Optional[str]:
         """Get the next search term from the SmartDetector."""
