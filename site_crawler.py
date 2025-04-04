@@ -12,6 +12,7 @@ import json
 import string
 import os
 from queue import PriorityQueue  # Import PriorityQueue
+import httpx
 
 # Import refactored/new components
 from console_manager import ConsoleManager
@@ -79,6 +80,8 @@ class SmartCrawler:
         self.max_queue_size = 1000  # Aumentar aún más, opcional
         
         self.js_files = set()  # Nueva lista para almacenar archivos JS
+        self.js_findings = []  # Nueva lista para hallazgos en JS
+        self.client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)  # Cliente HTTP para descargar JS
         
         self.console.print_info("SmartCrawler initialized.")
 
@@ -127,6 +130,8 @@ class SmartCrawler:
                 await self.browser.close()
             if 'playwright' in locals():
                 await playwright.stop()
+            await self.attack_engine.close_client()
+            await self.client.aclose()  # Cerrar cliente HTTP
 
     async def _crawl(self, page: Page, url: str, depth: int):
         """Recursive function to crawl the website."""
@@ -1276,101 +1281,62 @@ class SmartCrawler:
             self.console.print_warning(f"Error simulating human behavior: {str(e)}")
 
     async def _analyze_js_file(self, js_url: str):
-        """Descarga y analiza un archivo JavaScript."""
+        """Analiza el contenido de un archivo JS en busca de credenciales, API keys y misconfigurations."""
+        self.console.print_debug(f"Analyzing JavaScript file: {js_url}")
         try:
-            # Hacer una solicitud directa al archivo .js
-            response = await self.page.context.request.get(js_url)
-            js_content = await response.text()
-            self.console.print_debug(f"Analyzing JavaScript file: {js_url}")
-            
-            # Usar SmartDetector para analizar el contenido
-            js_findings = await self.detector.analyze_js(js_content)
-            if self.report_generator and js_findings:
-                self.report_generator.add_findings("javascript_analysis", js_findings)
-                self.console.print_debug(f"JS findings from {js_url}: {len(js_findings)}")
-            
-            # Opcional: Buscar URLs embebidas en el JS
-            url_pattern = r'(https?://[^\s"\']+)'
-            embedded_urls = re.findall(url_pattern, js_content)
-            for embedded_url in embedded_urls:
-                if self.is_in_scope(embedded_url):
-                    await self.add_to_crawl_queue(embedded_url, depth + 1)
-                    self.console.print_debug(f"Found embedded URL in JS: {embedded_url}")
-                    self.js_files.add(embedded_url)
-                
+            response = await self.client.get(js_url)
+            if response.status_code != 200:
+                self.console.print_warning(f"Failed to fetch JS file {js_url}: Status {response.status_code}")
+                return
+
+            content = response.text
+            self.console.print_debug("Analyzing JavaScript content...")
+
+            # Patrones para credenciales, API keys y misconfigurations
+            patterns = {
+                "API Key": [
+                    r"['\"]?(?:api[_-]?key|key|token)['\"]?\s*[:=]\s*['\"][A-Za-z0-9\-_]{20,100}['\"]",  # Generic API key
+                    r"['\"]?(?:google|aws|stripe|firebase|github)[_-]?(?:key|token|api)['\"]?\s*[:=]\s*['\"][A-Za-z0-9\-_]{20,100}['\"]"  # Específicos
+                ],
+                "Password": [
+                    r"['\"]?(?:password|passwd|pwd|secret)['\"]?\s*[:=]\s*['\"][^'\"]{6,50}['\"]"  # Contraseñas
+                ],
+                "Database Credentials": [
+                    r"['\"]?(?:db|database|mysql|postgres)[_-]?(?:user|username|pass|password)['\"]?\s*[:=]\s*['\"][^'\"]{1,50}['\"]"
+                ],
+                "Misconfiguration (Debug)": [
+                    r"console\.log\(['\"][^'\"]{1,100}['\"]\)",  # Uso excesivo de console.log
+                    r"debug\s*[:=]\s*true"  # Debug habilitado
+                ],
+                "Hardcoded URL": [
+                    r"['\"]https?://[^\s'\"]+['\"]"  # URLs embebidas
+                ]
+            }
+
+            findings = []
+            for category, regex_list in patterns.items():
+                for pattern in regex_list:
+                    matches = re.finditer(pattern, content, re.IGNORECASE)
+                    for match in matches:
+                        finding = {
+                            "url": js_url,
+                            "category": category,
+                            "match": match.group(0),
+                            "line": content.count('\n', 0, match.start()) + 1
+                        }
+                        findings.append(finding)
+                        self.console.print_warning(f"Found {category} in {js_url}: {match.group(0)} (Line {finding['line']})")
+
+            if findings:
+                self.js_findings.extend(findings)
+                self.report_generator.add_findings("js_analysis", findings)
+            else:
+                self.console.print_debug("No sensitive data or misconfigurations found in JS content")
+
+            self.console.print_debug("JavaScript analysis completed")
+
         except Exception as e:
             self.console.print_error(f"Error analyzing JS file {js_url}: {e}")
-
-    async def test_vulnerability(self, url: str, method: str = "GET", params: Optional[dict] = None, data: Optional[dict] = None):
-        self.console.print_info(f"Starting vulnerability test on {method} {url}")
-        
-        # Detectar WAF primero
-        waf_info = await self.detect_waf(url, method)
-        if waf_info:
-            self.record_finding("waf_detection", "INFO", {
-                "waf": waf_info["waf"], 
-                "signature": waf_info["signature"]
-            }, url)
-
-        # Resto del código para realizar pruebas de vulnerabilidad
-        # Aquí puedes continuar con la lógica existente para probar diferentes tipos de vulnerabilidades
-        # ...
-
-    async def detect_waf(self, url: str, method: str = "GET") -> Optional[Dict]:
-        self.console.print_info(f"Detecting WAF on {url}")
-        
-        # Lista ampliada de firmas de WAF
-        waf_signatures = {
-            "Cloudflare": ["cf-ray", "cloudflare", "__cfduid", "cf-chl-bypass", "cf-cache-status"],
-            "AWS WAF": ["aws-waf-token", "x-amzn-waf", "x-amzn-requestid", "awselb"],
-            "Imperva": ["x-iinfo", "incap_ses", "visid_incap", "x-cdn: Imperva"],
-            "Sucuri": ["x-sucuri-id", "sucuri/cloudproxy", "x-sucuri-cache"],
-            "F5 BIG-IP": ["bigipserver", "f5-traffic", "x-f5-cache"],
-            "Akamai": ["akamai-x-cache", "x-akamai-transformed", "akamaighost"],
-            "Fastly": ["x-fastly-cache", "fastly-debug", "x-served-by: cache"],
-            "Incapsula": ["x-cdn: Incapsula", "x-iinfo", "incap_ses"],
-            "ModSecurity": ["mod_security", "this request has been blocked"],
-            "NGINX WAF": ["nginx", "blocked by nginx"],  # Combinado con mensajes genéricos
-        }
-        
-        # Payload para provocar una respuesta del WAF
-        test_headers = {
-            "User-Agent": "' OR 1=1 --",
-            "X-Forwarded-For": "127.0.0.1; DROP TABLE users --"
-        }
-        
-        response = await self._make_request(url, method, headers=test_headers, payload_info="WAF Detection")
-        if not response:
-            self.console.print_warning("No response received for WAF detection")
-            return None
-
-        # Normalizar cabeceras y obtener cuerpo
-        headers = {k.lower(): v.lower() for k, v in response.headers.items()}
-        body = (await response.text()).lower()
-
-        # Buscar firmas específicas
-        detected_waf = None
-        detected_sig = None
-        for waf, signatures in waf_signatures.items():
-            for sig in signatures:
-                if sig in headers or any(sig in value for value in headers.values()) or sig in body:
-                    detected_waf = waf
-                    detected_sig = sig
-                    self.console.print_warning(f"WAF detected: {waf} (Signature: {sig})")
-                    return {"waf": waf, "signature": sig}
-
-        # Si no hay firma específica, verificar códigos de estado
-        if response.status_code in [403, 429, 503]:
-            status_desc = f"Status {response.status_code}"
-            waf_message = "Possible WAF detected"
-            if "server" in headers:
-                server_header = headers["server"]
-                waf_message += f" (Server: {server_header})"
-            self.console.print_warning(f"{waf_message} ({status_desc})")
-            return {"waf": "Unknown", "signature": status_desc}
-
-        self.console.print_debug("No WAF detected")
-        return None
 
     def _generate_js_files_report(self):
         """Genera un reporte separado con todos los archivos JS encontrados."""
