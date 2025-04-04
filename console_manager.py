@@ -6,6 +6,7 @@ from rich.syntax import Syntax
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, MofNCompleteColumn
 from rich.theme import Theme
 from typing import Any
+import argparse
 
 # Define a custom theme (optional)
 custom_theme = Theme({
@@ -154,3 +155,22 @@ class ConsoleManager:
             console=self.console,
             transient=True # Clears progress bar on completion
          )
+
+def main():
+    """Función principal para ejecutar el escáner de vulnerabilidades web."""
+    parser = argparse.ArgumentParser(description='Web Vulnerability Scanner with Advanced Features')
+    parser.add_argument('url', nargs='?', help='Target URL to scan')
+    # ... otros argumentos ...
+
+    args = parser.parse_args()
+
+    # Verificar y agregar 'https://' si es necesario
+    if args.url:
+        if not (args.url.startswith('http://') or args.url.startswith('https://')):
+            args.url = 'https://' + args.url  # Agregar 'https://' si no está presente
+
+    if not validate_target_url(args.url):
+        parser.print_help()
+        sys.exit(1)
+
+    # ... resto de la función ...
