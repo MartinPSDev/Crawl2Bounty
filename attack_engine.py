@@ -15,7 +15,7 @@ from datetime import datetime
 import shutil
 
 # Import Payloads and ConsoleManager
-from payloads import SQLI_PAYLOADS, XSS_PAYLOADS, CMD_PAYLOADS, SSTI_PAYLOADS, PATH_TRAVERSAL_PAYLOADS
+from payloads import OOB_PAYLOADS, SQLI_PAYLOADS, XSS_PAYLOADS, CMD_PAYLOADS, SSTI_PAYLOADS, PATH_TRAVERSAL_PAYLOADS
 from console_manager import ConsoleManager
 from smart_detector import SmartDetector # Import SmartDetector definition
 

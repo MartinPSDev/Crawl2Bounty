@@ -6,3 +6,4 @@ rich>=13.0.0
 httpx[http2]>=0.25.0
 requests>=2.31.0
 packaging>=23.2 
+aiofiles>=23.1.0

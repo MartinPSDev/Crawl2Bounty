@@ -17,10 +17,11 @@ from smart_detector import SmartDetector
 from attack_engine import AttackEngine
 import subprocess
 import requests
-from packaging import version
+from packaging import version 
 import json
 import functools
 import shutil
+from scan_runner import run_scan
 
 # Constantes de configuración
 MAX_DEPTH = 10  # Profundidad máxima recomendada
@@ -420,6 +421,13 @@ def main():
     # Initialize console early
     console = ConsoleManager(verbose=args.verbose)
 
+    # Pasa los valores necesarios al inicializar `ReportGenerator`
+    report_generator = ReportGenerator(
+        console_manager=console,
+        output_file=args.output,
+        domain_dir=create_domain_directory(args.url)
+    )
+
     # --- Define the async-aware signal handling logic ---
     async def shutdown(sig, loop, console):
         console.print_warning(f"\nReceived exit signal {sig.name}...")
@@ -434,20 +442,23 @@ def main():
         for task in tasks:
             task.cancel()
 
-        # Wait for tasks to finish cancelling
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        cancelled_count = 0
-        error_count = 0
-        for result in results:
-            if isinstance(result, asyncio.CancelledError):
-                cancelled_count += 1
-            elif isinstance(result, Exception):
-                error_count += 1
-                console.print_error(f"Error during task cleanup: {result}")
+        try:
+            # Wait for tasks to finish cancelling with a timeout
+            await asyncio.wait(tasks, timeout=5)
+        except asyncio.CancelledError:
+            console.print_warning("Some tasks did not finish in time.")
 
-        console.print_info(f"Tasks cancelled: {cancelled_count}, Errors during cleanup: {error_count}")
+        # Forcefully close the loop if tasks are still pending
+        pending_tasks = [t for t in asyncio.all_tasks() if not t.done()]
+        if pending_tasks:
+            console.print_warning(f"Forcing shutdown. {len(pending_tasks)} tasks are still pending.")
+            for task in pending_tasks:
+                task.cancel()
+            loop.stop()
 
-    async def async_main():
+        console.print_info("Shutdown complete.")
+
+    async def async_main(output_file, domain_dir, verbose):
         loop = asyncio.get_running_loop()
 
         # Register signal handlers
@@ -455,11 +466,6 @@ def main():
             loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop, console)))
 
         # Initialize components
-        report_generator = ReportGenerator(
-            console_manager=console,
-            output_file=args.output,
-            domain_dir=domain_dir
-        )
         crawler = SmartCrawler(
             base_url=args.url,
             max_depth=args.depth,
@@ -486,12 +492,22 @@ def main():
             )
         except asyncio.CancelledError:
             console.print_warning("Main scan loop cancelled.")
+            # Generar reporte parcial en caso de interrupción
+            await report_generator.generate_report("reporte_parcial")
+        except Exception as e:
+            logger.error(f"Error durante el escaneo: {e}", exc_info=True)
+            console.print_error(f"Error durante el escaneo: {e}")
+            # Generar reporte de error
+            await report_generator.generate_report("reporte_error")
         finally:
-            await attack_engine.close_client()
-            console.print_info("Scan process finished or interrupted.")
+            console.print_info("Escaneo finalizado.")
 
     try:
-        asyncio.run(async_main())
+        asyncio.run(async_main(
+            output_file=args.output,
+            domain_dir=create_domain_directory(args.url),
+            verbose=args.verbose
+        ))
     except KeyboardInterrupt:
         console.print_warning("\nKeyboardInterrupt caught (might be during setup/shutdown).")
     except Exception as e:
