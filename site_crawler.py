@@ -20,6 +20,7 @@ from advanced_js_analyzer import AdvancedJSAnalyzer
 from js_analyzer import JSAnalyzer # Static analyzer
 from traffic_analyzer import TrafficAnalyzer
 from report_generator import ReportGenerator # Needed to add findings
+from payloads import SQLI_PAYLOADS, XSS_PAYLOADS, CMD_PAYLOADS, SSTI_PAYLOADS, PATH_TRAVERSAL_PAYLOADS, OOB_PAYLOADS
 
 # Configurar logger
 logger = logging.getLogger(__name__)
@@ -81,68 +82,46 @@ class SmartCrawler:
         try:
             # Inicializar Playwright con opciones anti-detección
             playwright = await async_playwright().start()
-            self.browser = await playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-features=IsolateOrigins,site-per-process',
-                    '--disable-site-isolation-trials',
-                    '--disable-web-security',
-                    '--disable-features=BlockInsecurePrivateNetworkRequests'
-                ]
-            )
+            self.browser = await playwright.chromium.launch(headless=True, args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-site-isolation-trials',
+                '--disable-web-security'
+            ])
             
             # Configurar contexto con opciones anti-detección
             self.context = await self.browser.new_context(
                 viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                locale='es-ES',
-                timezone_id='America/Argentina/Buenos_Aires',
-                geolocation={'latitude': -34.6037, 'longitude': -58.3816},
-                permissions=['geolocation']
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             )
-            
-            # Configurar página con scripts anti-detección
             self.page = await self.context.new_page()
-            await self.page.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
-                });
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['es-ES', 'es', 'en-US', 'en']
-                });
-            """)
             
-            # Iniciar el crawling
-            max_queue_size = 100  # Límite de URLs en la cola
+            max_queue_size = 500  # Aumentar el límite
             await self.add_to_crawl_queue(start_url, 0)
             
             while not self.crawl_queue.empty() and self.crawl_queue.qsize() <= max_queue_size:
-                url, depth = await self.crawl_queue.get()
-                if url not in self.visited_urls and depth <= self.max_depth:
-                    self.visited_urls.add(url)
-                    await self._process_single_url(url, depth)
+                try:
+                    url, depth = await self.crawl_queue.get()
+                    if url not in self.visited_urls and depth <= self.max_depth:
+                        self.visited_urls.add(url)
+                        await self._process_single_url(url, depth)
+                except Exception as e:
+                    self.console.print_error(f"Error processing queue item: {e}")
             
             if self.crawl_queue.qsize() > max_queue_size:
                 self.console.print_warning(f"Queue size exceeded limit ({max_queue_size}), stopping crawl")
-            
+        
         except Exception as e:
             self.console.print_error(f"Error during crawl: {e}")
         finally:
-            try:
-                if self.page:
-                    await self.page.close()
-                if self.context:
-                    await self.context.close()
-                if self.browser:
-                    await self.browser.close()
-                if playwright:
-                    await playwright.stop()
-            except Exception as e:
-                self.console.print_error(f"Error closing browser: {e}")
+            if self.page:
+                await self.page.close()
+            if self.context:
+                await self.context.close()
+            if self.browser:
+                await self.browser.close()
+            if 'playwright' in locals():
+                await playwright.stop()
 
     async def _crawl(self, page: Page, url: str, depth: int):
         """Recursive function to crawl the website."""
