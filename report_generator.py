@@ -1,4 +1,6 @@
 import logging
+import os
+from rich.console import Console
 from console_manager import ConsoleManager
 from smart_detector import SmartDetector
 from attack_engine import AttackEngine
@@ -6,7 +8,6 @@ from urllib.parse import urlparse
 from typing import Dict, List, Any, Optional
 import json
 from datetime import datetime
-import os
 import time
 from collections import defaultdict
 import threading
@@ -53,12 +54,20 @@ class ReportGenerator:
         self.domain_dir = domain_dir or 'reports'
         self.report_format = report_format  # Formato del reporte
         os.makedirs(self.domain_dir, exist_ok=True)
+        self.realtime_events = []
 
-    def log_realtime_event(self, message: str, *args):
+    def add_findings(self, category: str, findings: list):
+        """Añade hallazgos a una categoría específica."""
+        if category not in self.findings:
+            self.findings[category] = []
+        self.findings[category].extend(findings)
+        self.console.print_debug(f"Added {len(findings)} findings to category '{category}'")
+
+    def log_realtime_event(self, event_type: str, message: str, details: dict = None):
         """Registra un evento en tiempo real."""
-        formatted_message = message.format(*args)
-        self.console.print_info(formatted_message)
-        logger.info(formatted_message)
+        event = {"type": event_type, "message": message, "details": details or {}}
+        self.realtime_events.append(event)
+        self.console.print_info(f"{event_type}: {message}")
 
     def _generate_summary(self):
         """Genera un resumen del escaneo."""
@@ -157,14 +166,14 @@ async def run_scan(crawler, detector, attack_engine, report_generator, save_scre
                         report_generator.add_findings("vulnerability_scan", vuln_findings)
                 
                 # Registrar finalización en logs
-                self.log_realtime_event("SCAN_COMPLETE", "Escaneo finalizado", {
-                    "duración_segundos": self.metadata["scan_duration_seconds"],
-                    "total_hallazgos": sum(len(findings) for findings in self.findings.values())
+                report_generator.log_realtime_event("SCAN_COMPLETE", "Escaneo finalizado", {
+                    "duración_segundos": report_generator.metadata["scan_duration_seconds"],
+                    "total_hallazgos": sum(len(findings) for findings in report_generator.findings.values())
                 })
             except Exception as e:
-                self.console.print_error(f"Error finalizando reporte: {e}")
+                report_generator.console.print_error(f"Error finalizando reporte: {e}")
     except Exception as e:
-        self.console.print_error(f"Error finalizando reporte: {e}")
+        report_generator.console.print_error(f"Error finalizando reporte: {e}")
 
     def generate_summary(self) -> dict:
         """Generates a summary dictionary from all collected findings."""
