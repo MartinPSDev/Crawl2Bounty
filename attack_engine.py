@@ -242,7 +242,7 @@ class AttackEngine:
         await test_payloads(SQLI_PAYLOADS, "SQLi", self._verify_sqli_error)
         await test_payloads(XSS_PAYLOADS, "XSS", self._verify_xss_reflection)
         await test_payloads(CMD_PAYLOADS, "CMDi", self._verify_cmdi_time)
-        await test_payloads(SSTI_PAYLOADS, "SSTI", self._verify_ssti_calc)
+        await test_payloads(SSTI_PAYLOADS, "SSTI", self._verify_ssti)
         await test_payloads(PATH_TRAVERSAL_PAYLOADS, "PathTraversal", self._verify_path_traversal)
         if self.interactsh_url:
             await test_payloads(OOB_PAYLOADS, "OOB", self._verify_oob)
@@ -424,60 +424,57 @@ class AttackEngine:
         if self._was_tested(test_key): return; self._mark_tested(test_key)
         self.console.print_debug(f"Testing SSTI on: {method} {url} (Field: {field})")
         original_value = base_params.get(field, base_data.get(field, ''))
-        expected_result_str = str(49) # 7*7
+        expected_result_str = str(49)  # 7*7
 
-        async def run_check(payload_category: str, check_payloads: list, verification_func: callable, verification_desc: str) -> bool:
-            payloads_to_test = check_payloads
-            # Flatten nested dicts if necessary (like for code_execution)
-            if payload_category == "code_execution":
-                 payloads_to_test = [p for engine_payloads in check_payloads.values() for p in engine_payloads]
+        # Define payloads for different template engines
+        payloads = {
+            "jinja2": ["{{ 7 * 7 }}", "{{ config }}"],
+            "freemarker": ["${7 * 7}", "${config}"],
+            # Agregar más motores y sus payloads
+        }
 
-            for payload_template in payloads_to_test:
-                 payload = payload_template
-                 if "INTERACTSH_URL" in payload:
-                     if not self.interactsh_url: continue
-                     payload = payload.replace("INTERACTSH_URL", self.interactsh_url)
+        for engine, payload_list in payloads.items():
+            for payload in payload_list:
+                obfuscated_payload = self.detector.obfuscate_payload(payload, level=0)  # No obfuscation for SSTI typically
+                current_params = base_params.copy()
+                if field in current_params:
+                    current_params[field] = obfuscated_payload
 
-                 obfuscated_payload = self.detector.obfuscate_payload(payload, level=0) # No obfuscation for SSTI typically
-                 test_values = [str(original_value) + obfuscated_payload, obfuscated_payload]
+                response = await self._make_request(url, method, params=current_params)
 
-                 for test_val in test_values:
-                    current_params=base_params.copy(); current_data=base_data.copy()
-                    if field in current_params: current_params[field]=test_val
-                    if field in current_data: current_data[field]=test_val
-                    response = await self._make_request(url, method, params=current_params, data=current_data, payload_info=f"SSTI-{payload_category}")
+                if response:
+                    is_vuln, details = await self._verify_ssti(response, expected_result_str, payload, engine)
+                    if is_vuln:
+                        self.record_finding(f"ssti_{engine.lower()}", "CRITICAL", {
+                            "field": field,
+                            "payload_used": payload,
+                            "test_value": obfuscated_payload,
+                            "verification": f"Confirmed {details}"
+                        }, url)
+                        return  # Found for field
 
-                    if response:
-                        is_vuln, details = await verification_func(response, expected_result_str, payload_template, test_val)
-                        self.console.print_attack_attempt(url, method, f"SSTI-{payload_category}", test_val, response.status_code, len(response.content), is_vuln, verification_desc)
-                        if is_vuln:
-                            self.record_finding(f"ssti_{payload_category.lower()}", "CRITICAL", {
-                                "field": field, "payload_used": payload, "test_value": test_val,
-                                "verification": f"{verification_desc} ({details})"
-                            }, url)
-                            return True
-            return False
+    async def _verify_ssti_jinja2(self, response: httpx.Response, expected: str, payload: str) -> Tuple[bool, str]:
+        """Verifies SSTI for Jinja2 templates."""
+        content = await response.text()
+        if "{{" in payload and "}}" in payload and expected in content:
+            return True, "Jinja2 SSTI confirmed"
+        return False, ""
 
-        if await run_check("detection", SSTI_PAYLOADS['basic_detection'], self._verify_ssti_calc, f"Calculation Result ({expected_result_str})"): return
-        if self.interactsh_url:
-             if await run_check("oob", SSTI_PAYLOADS['code_execution'].get('generic_oob',[]), self._verify_oob, "OOB Interaction"): return
+    async def _verify_ssti_freemarker(self, response: httpx.Response, expected: str, payload: str) -> Tuple[bool, str]:
+        """Verifies SSTI for Freemarker templates."""
+        content = await response.text()
+        if "${" in payload and "}" in payload and expected in content:
+            return True, "Freemarker SSTI confirmed"
+        return False, ""
 
-    async def _verify_ssti_calc(self, response: httpx.Response, expected_result: str, payload_template: str, test_val: str) -> Tuple[bool, str]:
-        if not response: return False, "No Response"
-        body = response.text
-        if expected_result in body and payload_template not in body and test_val not in body:
-             pattern = re.escape(expected_result)
-             matches = list(re.finditer(pattern, body))
-             payload_indices = [m.start() for m in re.finditer(re.escape(test_val), body)]
-             if not payload_indices: payload_indices = [body.find(test_val)]
-
-             for m in matches:
-                 is_near = any(abs(m.start() - p_idx) < 100 for p_idx in payload_indices if p_idx != -1)
-                 if is_near: continue
-
-                 return True, f"Found calculated '{expected_result}' in response away from input"
-
-        return False, f"Result '{expected_result}' not found or only reflected literally"
+    async def _verify_ssti(self, response: httpx.Response, expected: str, payload: str, template_engine: str) -> Tuple[bool, str]:
+        """General SSTI verification method."""
+        if template_engine == "jinja2":
+            return await self._verify_ssti_jinja2(response, expected, payload)
+        elif template_engine == "freemarker":
+            return await self._verify_ssti_freemarker(response, expected, payload)
+        # Agregar más motores de plantillas según sea necesario
+        return False, "Unsupported template engine"
 
     async def test_path_traversal(self, url, method, base_params=None, base_data=None, field=None, path_itself=False):
         vuln_type = "PathTraversal"; target_desc = "__PATH__" if path_itself else field
