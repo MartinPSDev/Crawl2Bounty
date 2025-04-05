@@ -64,10 +64,23 @@ class ReportGenerator:
         self.console.print_debug(f"Added {len(findings)} findings to category '{category}'")
 
     def log_realtime_event(self, event_type: str, message: str, details: dict = None):
-        """Registra un evento en tiempo real."""
-        event = {"type": event_type, "message": message, "details": details or {}}
-        self.realtime_events.append(event)
-        self.console.print_info(f"{event_type}: {message}")
+        """Registra un evento en tiempo real relevante y lo guarda en un archivo de texto."""
+        # Filtrar eventos relevantes
+        relevant_status_codes = [200, 301, 302] + list(range(500, 600))
+        status_code = details.get('status_code') if details else None
+
+        if status_code in relevant_status_codes:
+            event = {"type": event_type, "message": message, "details": details or {}}
+            self.realtime_events.append(event)
+            self.console.print_info(f"{event_type}: {message}")
+
+            # Guardar el evento en un archivo de texto
+            try:
+                realtime_report_path = os.path.join(self.domain_dir, 'realtime_events.txt')
+                with open(realtime_report_path, 'a') as realtime_file:
+                    realtime_file.write(f"{datetime.now().isoformat()} - {event_type}: {message} - {json.dumps(details)}\n")
+            except Exception as e:
+                self.console.print_error(f"Error guardando evento en tiempo real: {e}")
 
     def _generate_summary(self):
         """Genera un resumen del escaneo."""
