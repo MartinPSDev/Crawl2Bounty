@@ -344,3 +344,4 @@ if __name__ == "__main__":
         print("Crawl2Bounty requires Python 3.7 or higher.", file=sys.stderr)
         sys.exit(1)
     main()
+
