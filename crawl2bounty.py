@@ -348,5 +348,7 @@ if __name__ == "__main__":
     if sys.version_info < (3, 7):
         print("Crawl2Bounty requires Python 3.7 or higher.", file=sys.stderr)
         sys.exit(1)
-    main()
+    
+    # Suponiendo que `main` es una función async
+    asyncio.run(main())
 
