@@ -817,3 +817,4 @@ class SmartDetector:
             
         except Exception as e:
             self.console.print_error(f"Error analyzing dynamic content: {e}")
+
