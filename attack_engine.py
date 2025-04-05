@@ -43,7 +43,7 @@ class AttackEngine:
         """Closes the httpx client."""
         if hasattr(self, 'client') and self.client and not self.client.is_closed:
             self.console.print_debug("Closing AttackEngine HTTP client...")
-            await self.client.aclose()
+            await self.client.aclose() 
 
     def _validate_interactsh_url(self, url: Optional[str]) -> Optional[str]:
         """Removes http(s):// prefix from interactsh URL if present."""
@@ -134,6 +134,7 @@ class AttackEngine:
         except Exception as e:
             self.console.print_error(f"Unexpected error during request to {url} [{payload_info}]: {e}")
             return None
+         
 
     async def handle_forbidden(self, url: str) -> bool:
         """Attempts to bypass 403 Forbidden using custom techniques via httpx."""
@@ -676,3 +677,4 @@ class AttackEngine:
         return None
 
 
+          

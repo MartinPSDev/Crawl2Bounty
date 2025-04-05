@@ -23,7 +23,6 @@ from js_analyzer import JSAnalyzer # Static analyzer
 from traffic_analyzer import TrafficAnalyzer
 from report_generator import ReportGenerator # Needed to add findings
 from payloads import SQLI_PAYLOADS, XSS_PAYLOADS, CMD_PAYLOADS, SSTI_PAYLOADS, PATH_TRAVERSAL_PAYLOADS, OOB_PAYLOADS
-from scan_context import ScanContext  # Importar la nueva clase ScanContext
 
 # Configurar logger
 logger = logging.getLogger(__name__)
@@ -86,7 +85,6 @@ class SmartCrawler:
         self.php_files = set()  # Nueva lista para archivos PHP
         self.client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)  # Cliente HTTP para descargar JS
         
-        self.scan_context = ScanContext(self.base_url)  # Nuevo contexto compartido
         
         self.domain = urlparse(self.base_url).netloc  # Extraemos el dominio base (e.g., hominis.com.ar)
         self.allowed_subdomains = allowed_subdomains or []  # Lista opcional de subdominios permitidos
