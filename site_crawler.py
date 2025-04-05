@@ -1313,6 +1313,14 @@ class SmartCrawler:
                         findings.append(finding)
                         self.console.print_warning(f"Found {category} in {js_url}: {match.group(0)} (Line {finding['line']})")
 
+            # Guardar resultados en tiempo real
+            report_path = os.path.join(self.domain_dir, f"{urlparse(js_url).netloc}_js_files.txt")
+            with open(report_path, 'a') as f:
+                if findings:
+                    f.write(f"{js_url} - Issues found: {', '.join(set(f['category'] for f in findings))}\n")
+                else:
+                    f.write(f"{js_url} - No issues found\n")
+
             if findings:
                 self.js_findings.extend(findings)
                 self.report_generator.add_findings("js_analysis", findings)
