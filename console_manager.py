@@ -86,7 +86,17 @@ class ConsoleManager:
 
     def print_attack_attempt(self, url: str, method: str, payload_type: str, payload: str, status: int, response_len: int, is_vuln: bool = False, verification_method: str = ""):
         """Muestra un intento de ataque."""
-        status_color = "success" if status < 300 else "warning" if status < 400 else "error"
+        if status == 200:
+            status_color = "success"
+        elif 300 <= status < 400:
+            status_color = "orange1"
+        elif 400 <= status < 500:
+            status_color = "error"
+        elif status >= 500:
+            status_color = "magenta"
+        else:
+            status_color = "warning"  # Default for other status codes
+        
         vuln_marker = f"[vuln][VULN: {verification_method}][/vuln]" if is_vuln else ""
         payload_display = payload.replace('\n', '\\n').replace('\r', '\\r')
         payload_display = payload_display[:80] + '...' if len(payload_display) > 80 else payload_display
