@@ -253,7 +253,7 @@ async def shutdown(signal: signal.Signals, loop: asyncio.AbstractEventLoop, cons
     await asyncio.gather(*tasks, return_exceptions=True)
     loop.stop()
 
-def main():
+async def main():
     """Función principal para ejecutar el escáner de vulnerabilidades web."""
     parser = argparse.ArgumentParser(description='Web Vulnerability Scanner with Advanced Features')
     parser.add_argument('url', nargs='?', help='Target URL to scan')
@@ -319,6 +319,7 @@ def main():
         console.print_error(f"Fatal error al inicializar: {e}", fatal=True)
         sys.exit(1)
 
+    # Configurar el event loop
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
@@ -330,7 +331,7 @@ def main():
 
     try:
         logger.debug("Ejecutando escaneo...")
-        loop.run_until_complete(run_scan(crawler, detector, attack_engine, report_generator, args.screenshots, args.responses, args.output))
+        await run_scan(crawler, detector, attack_engine, report_generator, args.screenshots, args.responses, args.output)
     except KeyboardInterrupt:
         logger.debug("Interrupción por usuario")
     except Exception as e:
@@ -339,9 +340,8 @@ def main():
         sys.exit(1)
     finally:
         logger.debug("Cerrando recursos...")
-        loop.run_until_complete(attack_engine.close_client())
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.close()
+        await attack_engine.close_client()
+        await asyncio.sleep(0)  # Para asegurar que todas las tareas se cierren
         logger.info("Programa finalizado")
 
 if __name__ == "__main__":
@@ -349,6 +349,6 @@ if __name__ == "__main__":
         print("Crawl2Bounty requires Python 3.7 or higher.", file=sys.stderr)
         sys.exit(1)
     
-    # Suponiendo que `main` es una función async
+    # Ejecutar la corrutina main
     asyncio.run(main())
 
