@@ -163,6 +163,16 @@ class ReportGenerator:
         except Exception as e:
             self.console.print_error(f"Error saving JS URLs: {e}")
 
+    def log_realtime_finding(self, finding_type: str, details: dict):
+        """Registra un hallazgo en tiempo real en un archivo de texto."""
+        try:
+            realtime_findings_path = os.path.join(self.domain_dir, 'realtime_findings.txt')
+            with open(realtime_findings_path, 'a') as findings_file:
+                findings_file.write(f"{datetime.now().isoformat()} - {finding_type}: {json.dumps(details)}\n")
+            self.console.print_info(f"Real-time finding logged: {finding_type}")
+        except Exception as e:
+            self.console.print_error(f"Error logging real-time finding: {e}")
+
 async def run_scan(crawler, detector, attack_engine, report_generator, save_screenshots=False, save_responses=False):
     from site_crawler import SmartCrawler  # Importación dentro de la función
     """Ejecuta el escaneo completo."""
