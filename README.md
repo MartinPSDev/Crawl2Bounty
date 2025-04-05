@@ -42,19 +42,38 @@ In summary, CRAWL2BOUNTY is a comprehensive tool that combines static and dynami
 
 <img src="/assets/help_.png" width="auto" height="5%" alt="banner image">
 
-## Usage
+## 📦 **Installation**
+To install the required dependencies, run:
 
-`pip intall -r requirements.txt`
+```bash
+pip install -r requirements.txt
+```
 
-`python3 crawl2bounty.py Https://target.com`
+## 🛠️ **Usage**
+Run the scanner with the following command:
 
-## Example 
+```bash
+python crawl2bounty.py <target_url> [options]
+```
 
-`python3 crawl2bounty.py https://target.com  -v --depth 4  --rate-limit 5 -o results`
+## 📈 **Example** 
+
+```bash
+python3 crawl2bounty.py https://target.com  -v --depth 4  --rate-limit 5 -o results
+```
 
 ## IMPORTANT
 
 **Social media URLs or bots from Google, Bing, etc. are excluded so as not to go out of scope and start crawling through sites that aren't our target. If we want to analyze a social media ( Facebook, Instagram ,Tik Tok, X ) , Google, Yahoo, etc., we must include the -f or --force flag to remove URL restrictions.**
 
-Example:
-`python3 crawl2bounty.py https://instagram.com --force`
+### Example:
+
+```bash
+python3 crawl2bounty.py https://instagram.com --force`
+```
+
+ 
+
+## 📜 **License**
+This project is licensed under the MIT License - see the [LICENSE](path/to/your/license_file.md) file for details.
+
