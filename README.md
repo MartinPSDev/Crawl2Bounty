@@ -62,6 +62,12 @@ python crawl2bounty.py <target_url> [options]
 python3 crawl2bounty.py https://target.com  -v --depth 4  --rate-limit 5 -o results
 ```
 
+## Out-of-band attack
+
+```bash
+python crawl2bounty.py --interactsh-url http://your-interactsh-server.com
+```
+
 ## IMPORTANT
 
 **Social media URLs or bots from Google, Bing, etc. are excluded so as not to go out of scope and start crawling through sites that aren't our target. If we want to analyze a social media ( Facebook, Instagram ,Tik Tok, X ) , Google, Yahoo, etc., we must include the -f or --force flag to remove URL restrictions.**
