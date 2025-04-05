@@ -119,8 +119,16 @@ class AttackEngine:
                 method, url, params=params, content=req_data, # Use content for bytes/str
                 headers=req_headers
             )
+            
+            # Validar el content-type antes de procesar el contenido
+            if not self.is_valid_content_type(response.headers.get("content-type", "")):
+                self.console.print_warning(f"Invalid content type for {url}: {response.headers.get('content-type')}")
+                return response  # O manejar de otra manera según sea necesario
+
+            # Procesar el contenido si es válido
+            content = await response.text()
             duration = time.time() - start_time
-            self.console.print_debug(f"Response [{payload_info}]: {response.status_code} in {duration:.2f}s (Len:{len(response.content)}) for {url}")
+            self.console.print_debug(f"Response [{payload_info}]: {response.status_code} in {duration:.2f}s (Len:{len(content)}) for {url}")
             return response
         except httpx.TimeoutException:
             self.console.print_warning(f"Request timed out ({self.client.timeout}s) for {url} [{payload_info}]")
@@ -675,6 +683,11 @@ class AttackEngine:
             return {"waf": "Unknown", "signature": f"Status {response.status_code}"}
         self.console.print_debug("No WAF detected")
         return None
+
+    def is_valid_content_type(self, content_type: str) -> bool:
+        """Validates the content type of the response."""
+        valid_types = ['text/html', 'application/json', 'application/xml']
+        return any(valid in content_type for valid in valid_types)
 
 
           
