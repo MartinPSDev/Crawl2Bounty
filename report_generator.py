@@ -320,6 +320,3 @@ async def shutdown(signal: signal.Signals, loop: asyncio.AbstractEventLoop):
     await asyncio.gather(*tasks, return_exceptions=True)
     loop.stop()
 
-def main():
-    # Lógica de tu aplicación
-    pass  # Aquí va tu código
