@@ -69,3 +69,4 @@ async def run_scan(crawler: SmartCrawler, detector: SmartDetector, attack_engine
         # Asegurar que se genere un reporte parcial
         await report_generator.generate_report("reporte_error")
         raise
+
