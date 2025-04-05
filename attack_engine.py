@@ -652,9 +652,16 @@ class AttackEngine:
         await self.close_client()
 
     async def _test_single_payload(self, url, method, payload, params, data, headers, verify_func):
-        # Inyectar payload en un parámetro genérico o existente
-        test_params = {**params, "test": payload} if not params else {k: payload if i == 0 else v for i, (k, v) in enumerate(params.items())}
-        test_data = {**data, "test": payload} if not data else {k: payload if i == 0 else v for i, (k, v) in enumerate(data.items())}
+        # Inyectar payload en un parámetro existente si es posible
+        test_params = params.copy() if params else {}
+        test_data = data.copy() if data else {}
+        if not test_params and not test_data:
+            test_params = {"input": payload}  # Usar un nombre de parámetro más genérico
+        else:
+            for k in test_params:
+                test_params[k] = payload
+            for k in test_data:
+                test_data[k] = payload
         
         try:
             response = await self._make_request(url, method, params=test_params, data=test_data, headers=headers)
