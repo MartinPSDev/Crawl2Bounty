@@ -319,7 +319,12 @@ def main():
         console.print_error(f"Fatal error al inicializar: {e}", fatal=True)
         sys.exit(1)
 
-    loop = asyncio.get_event_loop()
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, lambda s=sig: asyncio.create_task(shutdown(s, loop, console, attack_engine)))
 
