@@ -40,7 +40,7 @@ Results are classified by type (e.g., sql_injection, xss_reflected) and severity
 
 In summary, CRAWL2BOUNTY is a comprehensive tool that combines static and dynamic analysis to evaluate web application security, ideal for bug bounty environments or security audits.
 
-<img src="/assets/help_.png" width="auto" height="5%" alt="banner image">
+<img src="/assets/help_.png" width="auto" height="auto" alt="banner image">
 
 ## 📦 **Installation**
 To install the required dependencies, run:
