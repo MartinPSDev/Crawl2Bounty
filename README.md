@@ -64,6 +64,8 @@ python3 crawl2bounty.py https://target.com  -v --depth 4  --rate-limit 5 -o resu
 
 ## Out-of-band attack
 
+- Note: It does not necessarily have to be from Interactsh, it can be another server or API for public use.
+
 ```bash
 python crawl2bounty.py --interactsh-url http://your-interactsh-server.com
 ```
