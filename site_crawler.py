@@ -38,8 +38,7 @@ class SmartCrawler:
                  interactsh_url: Optional[str] = None,
                  report_generator: Optional[ReportGenerator] = None,
                  force: bool = False,
-                 domain_dir: str = None,
-                 allowed_subdomains: list = None):
+                 domain_dir: str = None):
         """Initialize the SmartCrawler with configuration parameters."""
         # Initialize console manager with verbose enabled
         self.console = ConsoleManager(verbose=True)
@@ -54,7 +53,7 @@ class SmartCrawler:
         self.attack_engine = AttackEngine(console_manager=self.console, smart_detector=self.detector, interactsh_url=interactsh_url)
         
         # Set configuration parameters
-        self.base_url = self._normalize_url(base_url)
+        self.base_url = base_url
         self.max_depth = max_depth
         self.timeout = timeout * 1000  # Convert to milliseconds
         self.rate_limit_delay = rate_limit
@@ -84,10 +83,6 @@ class SmartCrawler:
         self.js_findings = []  # Nueva lista para hallazgos en JS
         self.php_files = set()  # Nueva lista para archivos PHP
         self.client = httpx.AsyncClient(timeout=timeout, follow_redirects=True)  # Cliente HTTP para descargar JS
-        
-        
-        self.domain = urlparse(self.base_url).netloc  # Extraemos el dominio base (e.g., hominis.com.ar)
-        self.allowed_subdomains = allowed_subdomains or []  # Lista opcional de subdominios permitidos
         
         self.console.print_info("SmartCrawler initialized.")
 
@@ -169,49 +164,182 @@ class SmartCrawler:
             self.console.print_error(f"Error while crawling {url}: {e}")
 
     async def _process_single_url(self, url: str, depth: int):
-        """Procesa una URL individual, incluyendo navegación, análisis y verificación de vulnerabilidades."""
+        """Process a single URL, including navigation, analysis, and interaction."""
         if self.report_generator:
-            self.report_generator.log_realtime_event("URL_PROCESSING", f"Procesando URL: {url}", {"depth": depth, "timestamp": datetime.now().isoformat()})
+            self.report_generator.log_realtime_event("URL_PROCESSING", f"Procesando URL: {url}", {
+                "depth": depth,
+                "timestamp": datetime.now().isoformat()
+            })
+        
         self.console.print_info(f"Processing URL: {url} (depth: {depth})")
+        
         try:
-            navigation_options = {"wait_until": "domcontentloaded", "timeout": self.timeout, "referer": self.base_url}
-            await self.page.goto(url, **navigation_options)
-
-            # Verificar CAPTCHA
+            # Configurar opciones de navegación más robustas
+            navigation_options = {
+                "wait_until": "domcontentloaded",
+                "timeout": self.timeout,
+                "referer": self.base_url
+            }
+            
+            # Intentar navegar a la URL
+            try:
+                await self.page.goto(url, **navigation_options)
+            except Exception as e:
+                self.console.print_warning(f"Error en primera navegación a {url}: {e}")
+                navigation_options["wait_until"] = "load"
+                await self.page.goto(url, **navigation_options)
+            
+            # Esperar a que la página se cargue completamente
+            try:
+                await self.page.wait_for_load_state("load", timeout=self.timeout)
+            except Exception as e:
+                self.console.print_warning(f"Error esperando carga completa de {url}: {e}")
+            
+            # Verificar si hay CAPTCHA
             page_content = await self.page.content()
             if await self._detect_captcha(page_content):
                 self.console.print_warning(f"CAPTCHA detectado en {url}")
-                # Manejo de CAPTCHA
-                return
-
-            # Verificar bloqueos de página
+                if self.report_generator:
+                    self.report_generator.add_findings("access_control", [{
+                        "type": "captcha_detected",
+                        "severity": "INFO",
+                        "url": url,
+                        "details": "Se detectó un CAPTCHA en la página"
+                    }])
+                
+                # Intentar manejar el CAPTCHA
+                if await self._handle_captcha(url):
+                    self.console.print_success(f"CAPTCHA superado en {url}")
+                else:
+                    self.console.print_error(f"No se pudo superar el CAPTCHA en {url}")
+                    return
+            
+            # Verificar si la página está bloqueada
             if any(blocked_text in page_content.lower() for blocked_text in ["access denied", "bot detected", "security check"]):
                 self.console.print_warning(f"Página {url} parece estar bloqueada")
+                if self.report_generator:
+                    self.report_generator.add_findings("access_control", [{
+                        "type": "page_blocked",
+                        "severity": "INFO",
+                        "url": url,
+                        "details": "La página parece estar bloqueada"
+                    }])
                 return
+            
+            # Static JS analysis
+            self.console.print_debug("Performing static JS analysis...")
+            try:
+                js_findings = await self.detector.analyze_js(page_content)
+                if self.report_generator and js_findings:
+                    self.report_generator.add_findings("javascript_analysis", js_findings)
+                    self.console.print_debug(f"JS findings added to report: {len(js_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error en análisis JS: {e}")
+            
+            # Basic vulnerability checks
+            self.console.print_debug("Performing vulnerability checks...")
+            try:
+                parsed_url = urlparse(url)
+                params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
+                vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params)
+                if self.report_generator and vuln_findings:
+                    self.report_generator.add_findings("vulnerability_scan", vuln_findings)
+                    self.console.print_debug(f"Vulnerability findings added: {len(vuln_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error en verificación de vulnerabilidades: {e}")
+            
+            # Dynamic analysis
+            self.console.print_debug("Performing dynamic analysis...")
+            try:
+                if self.page:
+                    dynamic_findings = await self.detector.analyze_dynamic_content(self.page)
+                    if self.report_generator and dynamic_findings:
+                        self.report_generator.add_findings("dynamic_analysis", dynamic_findings)
+                        self.console.print_debug(f"Dynamic findings added to report: {len(dynamic_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error en análisis dinámico: {e}")
+            
+            # Handle interactive elements
+            self.console.print_debug("Handling interactive elements...")
+            try:
+                findings = await self.handle_interactive_elements(self.page, url, depth)
+                if self.report_generator and findings:
+                    self.report_generator.add_findings("interactive_elements", findings)
+                    self.console.print_debug(f"Interactive findings added to report: {len(findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error manejando elementos interactivos: {e}")
+            
+            # Handle forms
+            self.console.print_debug("Handling forms...")
+            try:
+                if self.page:
+                    forms = await self.page.query_selector_all('form')
+                    for form in forms:
+                        form_findings = await self.handle_form_submission(self.page, form, url, depth)
+                        if self.report_generator and form_findings:
+                            self.report_generator.add_findings("form_analysis", form_findings)
+                            self.console.print_debug(f"Form findings added to report: {len(form_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error manejando formularios: {e}")
+            
+            # Handle search forms
+            self.console.print_debug("Handling search forms...")
+            try:
+                if self.page:
+                    search_findings = await self.handle_search_forms(self.page, url, depth)
+                    if self.report_generator and search_findings:
+                        self.report_generator.add_findings("search_analysis", search_findings)
+                        self.console.print_debug(f"Search findings added to report: {len(search_findings)}")
+            except Exception as e:
+                self.console.print_error(f"Error manejando formularios de búsqueda: {e}")
+            
+            # Gather new links
+            self.console.print_debug("Gathering new links...")
+            try:
+                if self.page:
+                    # Recolectar enlaces <a>
+                    links = await self.page.query_selector_all('a[href]')
+                    new_urls = []
+                    for link in links:
+                        href = await link.get_attribute('href')
+                        if href:
+                            full_url = urljoin(url, href)
+                            if self.is_in_scope(full_url):
+                                new_urls.append(full_url)
+                                await self.add_to_crawl_queue(full_url, depth + 1)
 
-            # Añadir parámetros al ScanContext
-            parsed_url = urlparse(url)
-            params = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
-            if params:
-                self.scan_context.add_url_params(url, "GET", params)
+                    # Recolectar scripts <script src>
+                    scripts = await self.page.query_selector_all('script[src]')
+                    for script in scripts:
+                        src = await script.get_attribute('src')
+                        if src:
+                            full_script_url = urljoin(url, src)
+                            if self.is_in_scope(full_script_url) and full_script_url.endswith('.js'):
+                                self.console.print_debug(f"Found JavaScript file: {full_script_url}")
+                                new_urls.append(full_script_url)
+                                await self.add_to_crawl_queue(full_script_url, depth + 1)
+                                # Opcional: Analizar el contenido del archivo .js
+                                await self._analyze_js_file(full_script_url)
 
-            # Análisis de JavaScript
-            js_findings = await self.detector.analyze_js(page_content)
-            if self.report_generator and js_findings:
-                self.report_generator.add_findings("javascript_analysis", js_findings)
-                for finding in js_findings:
-                    self.scan_context.add_js_finding(finding)
-
-            # Verificación de vulnerabilidades
-            vuln_findings = await self.attack_engine.test_vulnerability(url, "GET", params=params, context=self.scan_context)
-            if self.report_generator and vuln_findings:
-                self.report_generator.add_findings("vulnerability_scan", vuln_findings)
-
-            # Manejo de enlaces y recursos
-            # ...
-
+                    if self.report_generator:
+                        self.report_generator.log_realtime_event("LINKS_FOUND", f"Enlaces encontrados en {url}", {
+                            "total_links": len(new_urls),
+                            "new_urls": new_urls[:5]
+                        })
+            except Exception as e:
+                self.console.print_error(f"Error recolectando enlaces: {e}")
+            
+            # Wait for rate limiting
+            await asyncio.sleep(self.rate_limit_delay)
+            
         except Exception as e:
-            self.console.print_error(f"Error processing {url}: {e}")
+            error_msg = f"Error processing {url}: {str(e)}"
+            self.console.print_warning(error_msg)
+            if self.report_generator:
+                self.report_generator.log_realtime_event("ERROR", error_msg, {
+                    "url": url,
+                    "error_type": type(e).__name__
+                })
 
     async def handle_form_submission(self, page: Page, base_url: str, form_data: dict, depth: int):
         """Fills form, triggers vuln tests, optionally submits via Playwright."""
@@ -402,11 +530,10 @@ class SmartCrawler:
         parsed_base = urlparse(self.base_url)
         parsed_url = urlparse(url)
         base_domain = parsed_base.netloc  # e.g., hominis.com.ar
-        url_domain = parsed_url.netloc    # e.g., sub.hominis.com.ar
+        url_domain = parsed_url.netloc    # e.g., legajo.moron.gob.ar o sub.hominis.com.ar
         
         # Permitir subdominios y el dominio exacto
         if not url_domain.endswith('.' + base_domain) and url_domain != base_domain:
-            self.console.print_debug(f"URL {url} fuera del scope: dominio no coincide con {base_domain}")
             return False
         
         # Asegurar que sea un esquema válido (http/https)
@@ -1280,38 +1407,3 @@ class SmartCrawler:
                         }
                         self.console.print_warning(f"Potential {vuln_type} vulnerability in {test_url}: {details}")
                         self.report_generator.add_findings("php_vulnerabilities", [finding])
-
-    async def test_xss(self, url, method, base_params, base_data, field):
-        """Prueba de vulnerabilidad XSS en un campo específico."""
-        vuln_type = "XSS"
-        test_key = self._get_test_key(method, url, field, vuln_type)
-        if self._was_tested(test_key):
-            return  # Ya se ha probado este campo
-
-        self._mark_tested(test_key)
-        self.console.print_debug(f"Testing XSS on: {method} {url} (Field: {field})")
-        unique_marker = f"rhxss{random.randint(1000,9999)}"
-        payload = f"<script>console.log('{unique_marker}')</script>"
-        test_params = base_params.copy()
-        test_params[field] = payload
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            await page.goto(url + "?" + urlencode(test_params))
-            console_logs = []
-            page.on("console", lambda msg: console_logs.append(msg.text))
-            await page.wait_for_timeout(1000)  # Esperar un segundo para capturar los logs
-            is_vuln = any(unique_marker in log for log in console_logs)
-            if is_vuln:
-                finding = {
-                    "type": "xss_reflected",
-                    "severity": "HIGH",
-                    "url": url,
-                    "field": field,
-                    "payload": payload,
-                    "verification": "Console log confirmed"
-                }
-                self.js_findings.append(finding)
-                self.console.print_warning(f"XSS confirmed in {url} (Field: {field})")
-            await browser.close()
