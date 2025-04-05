@@ -69,7 +69,7 @@ python3 crawl2bounty.py https://target.com  -v --depth 4  --rate-limit 5 -o resu
 ### Example:
 
 ```bash
-python3 crawl2bounty.py https://instagram.com --force`
+python3 crawl2bounty.py https://instagram.com --force
 ```
 
  
