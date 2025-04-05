@@ -457,7 +457,6 @@ class SmartDetector:
                   payload = payload.replace('<', ''.join(f"\\u{ord(c):04x}" for c in '<'))
                   techniques_applied.append("js_unicode")
 
-
         # Level 3: Full URL encoding, different base encodings, concatenation
         if level >= 3:
             encoding_choice = random.random()
@@ -468,6 +467,13 @@ class SmartDetector:
                   payload = payload.replace("alert(1)", f"eval(atob('{base64.b64encode(b'alert(1)').decode()}'))")
                   techniques_applied.append("base64_eval")
             # Add concatenation breakups if useful (e.g., 'al'+'ert(1)') - needs more logic
+
+        # New Level 4: Unicode encoding and SQL comments
+        if level >= 4:
+            payload = ''.join([f"%u{ord(c):04x}" for c in payload])
+            techniques_applied.append("unicode_encoding")
+            payload = re.sub(r"(?<=\w)\s+(?=\w)", "/**/", payload)
+            techniques_applied.append("sql_comments")
 
         self.console.print_info(f"Payload Obfuscation (Level {level}): {original_payload[:30]}... -> {payload[:40]}... | Techniques: {techniques_applied or 'None'}")
         return payload

