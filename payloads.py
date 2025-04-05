@@ -572,3 +572,4 @@ async def _verify_path_traversal(self, response):
         return True
     self.console.print_debug("Path traversal not confirmed")
     return False
+
